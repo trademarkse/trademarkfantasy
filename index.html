@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TradeMark Fantasy League</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --ink:#0c0d10; --surface:#15171d; --raised:#1c1f27; --line:#2a2e38;
+  --text:#eceef3; --muted:#98a0af; --gold:#f5c443; --gold-deep:#c9971e;
+  --live:#ff4438; --ok:#3fbf6f; --bad:#e5484d;
+  --disp:"Barlow Condensed",Impact,sans-serif; --body:"Inter",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--ink);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.45;padding-bottom:60px}
+button{font-family:var(--body);cursor:pointer;border:none}
+input,select{font-family:var(--body);background:var(--ink);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:15px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+a{color:var(--gold)}
+.tm{font-size:.55em;vertical-align:super;opacity:.75}
+
+/* header */
+.hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,#101116,#0c0d10);border-bottom:1px solid var(--line)}
+.hdr-in{display:flex;align-items:center;gap:12px;padding:10px 14px;max-width:1100px;margin:0 auto}
+.logo{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--text)}
+.logo-badge{width:34px;height:34px;border-radius:8px;background:var(--gold);color:#141414;display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:800;font-size:17px;letter-spacing:.5px}
+.logo-txt{font-family:var(--disp);font-weight:800;font-size:21px;letter-spacing:.6px;text-transform:uppercase;line-height:1}
+.logo-sub{font-size:10px;color:var(--muted);letter-spacing:2.5px;text-transform:uppercase;font-weight:600}
+.idchip{margin-left:auto;background:var(--raised);border:1px solid var(--line);border-radius:99px;padding:6px 13px;font-weight:600;font-size:13px;color:var(--text)}
+.idchip b{color:var(--gold)}
+
+/* nav */
+.nav{display:flex;gap:2px;overflow-x:auto;max-width:1100px;margin:0 auto;padding:0 8px;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav button{background:none;color:var(--muted);font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:1px;text-transform:uppercase;padding:9px 13px;border-bottom:3px solid transparent;white-space:nowrap}
+.nav button.on{color:var(--text);border-color:var(--gold)}
+
+.wrap{max-width:1100px;margin:0 auto;padding:16px 14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.card h2{font-family:var(--disp);font-weight:800;font-size:22px;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px}
+.card h3{font-family:var(--disp);font-weight:700;font-size:17px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:12px 0 6px}
+.sub{color:var(--muted);font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+
+/* tables */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-family:var(--disp);font-weight:700;letter-spacing:1px;text-transform:uppercase;font-size:13px;color:var(--muted);text-align:left;padding:9px 10px;background:var(--raised);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.mine td{background:rgba(245,196,67,.06)}
+
+/* buttons */
+.btn{background:var(--raised);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 14px;font-weight:600;font-size:14px}
+.btn:hover{border-color:var(--muted)}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:#141414}
+.btn.gold:hover{background:#ffd35e}
+.btn.red{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.ghost{background:none}
+.btn.sm{padding:4px 10px;font-size:13px;border-radius:6px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* pills */
+.pill{display:inline-block;border-radius:99px;padding:2px 9px;font-size:12px;font-weight:700;letter-spacing:.4px}
+.pill.pos{background:var(--raised);border:1px solid var(--line);color:var(--muted)}
+.pill.fa{background:rgba(63,191,111,.15);color:var(--ok)}
+.pill.own{background:rgba(245,196,67,.14);color:var(--gold)}
+.pill.rk{background:rgba(152,160,175,.15);color:var(--muted)}
+.pill.live{background:var(--live);color:#fff;animation:pulse 1.2s infinite}
+.pill.bye{background:var(--raised);border:1px solid var(--line);color:var(--muted)}
+@keyframes pulse{50%{opacity:.55}}
+
+/* draft: on-the-clock lower third */
+.otc{background:linear-gradient(100deg,var(--gold) 0 78%,var(--gold-deep) 78%);color:#141414;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:16px;margin-bottom:14px;box-shadow:0 6px 24px rgba(245,196,67,.18)}
+.otc .lbl{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:2.5px;text-transform:uppercase;opacity:.8}
+.otc .who{font-family:var(--disp);font-weight:800;font-size:32px;letter-spacing:.5px;text-transform:uppercase;line-height:1}
+.otc .meta{font-size:13px;font-weight:600;opacity:.85}
+.otc .clock{margin-left:auto;font-family:var(--disp);font-weight:800;font-size:44px;font-variant-numeric:tabular-nums;line-height:1}
+.otc .clock.hot{color:var(--live)}
+.otc.paused{background:var(--raised);color:var(--text);box-shadow:none;border:1px solid var(--line)}
+
+/* draft order strip */
+.strip{display:flex;gap:8px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px;scrollbar-width:none}
+.strip::-webkit-scrollbar{display:none}
+.strip .stop{min-width:110px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.strip .stop.now{border-color:var(--gold);background:rgba(245,196,67,.08)}
+.strip .stop .pk{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:1px}
+.strip .stop .tn{font-family:var(--disp);font-weight:700;font-size:16px;text-transform:uppercase;letter-spacing:.4px}
+
+/* draft board grid */
+.board{display:grid;gap:5px;font-size:12px}
+.board .cell{background:var(--raised);border:1px solid var(--line);border-radius:7px;padding:6px 7px;min-height:52px}
+.board .cell .p{font-weight:600;font-size:12.5px;line-height:1.2}
+.board .cell .m{color:var(--muted);font-size:11px}
+.board .cell.empty{background:var(--surface);border-style:dashed}
+.board .colhead{font-family:var(--disp);font-weight:700;text-transform:uppercase;letter-spacing:.6px;font-size:13px;color:var(--muted);text-align:center;padding:3px 0}
+
+/* countdown */
+.count{display:flex;gap:14px;justify-content:center;padding:8px 0 4px}
+.count .u{text-align:center}
+.count .n{font-family:var(--disp);font-weight:800;font-size:46px;line-height:1;font-variant-numeric:tabular-nums}
+.count .l{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+/* matchup cards */
+.mu{display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.mu .side{flex:1}
+.mu .side.right{text-align:right}
+.mu .tn{font-family:var(--disp);font-weight:700;font-size:18px;text-transform:uppercase;letter-spacing:.4px}
+.mu .sc{font-family:var(--disp);font-weight:800;font-size:26px;font-variant-numeric:tabular-nums}
+.mu .vs{color:var(--muted);font-size:12px;font-weight:700}
+.mu .win{color:var(--gold)}
+
+/* lineup slots */
+.slot{display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:7px}
+.slot .tag{font-family:var(--disp);font-weight:800;width:44px;text-align:center;color:var(--gold);letter-spacing:.5px}
+.slot select{flex:1;min-width:0}
+.slot .pt{font-variant-numeric:tabular-nums;font-weight:600;min-width:46px;text-align:right}
+
+/* forms/admin */
+.frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.statgrid input{width:52px;padding:5px 6px;text-align:right;font-size:13px}
+.danger{border-color:rgba(229,72,77,.5)}
+.note{background:rgba(245,196,67,.07);border:1px solid rgba(245,196,67,.3);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+
+/* modal + toast */
+.modalbg{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:100;padding:18px}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:400px}
+.modal h2{font-family:var(--disp);font-weight:800;font-size:22px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
+.teampick{display:grid;gap:8px;margin-bottom:12px}
+.teampick button{background:var(--raised);border:1px solid var(--line);border-radius:9px;padding:11px;font-family:var(--disp);font-weight:700;font-size:18px;text-transform:uppercase;letter-spacing:.5px;color:var(--text);text-align:left}
+.teampick button.on{border-color:var(--gold);color:var(--gold)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--raised);border:1px solid var(--gold);color:var(--text);border-radius:99px;padding:10px 18px;font-weight:600;font-size:14px;z-index:200;display:none;max-width:92vw;text-align:center}
+.previewbar{background:#2b2410;color:var(--gold);text-align:center;font-size:12.5px;font-weight:600;padding:6px 10px}
+.empty{color:var(--muted);text-align:center;padding:26px 10px;font-size:14px}
+.statline{font-size:12px;color:var(--muted)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:600px){
+  .otc .who{font-size:24px}.otc .clock{font-size:36px}
+  .logo-sub{display:none}
+}
+</style>
+</head>
+<body>
+<div id="previewbar" class="previewbar" style="display:none">PREVIEW MODE: no shared database connected. Data saves to this device only.</div>
+<header class="hdr">
+  <div class="hdr-in">
+    <a class="logo" href="#draft">
+      <div class="logo-badge">TM</div>
+      <div>
+        <div class="logo-txt">TradeMark <span style="color:var(--gold)">Fantasy</span></div>
+        <div class="logo-sub">Dynasty &middot; Est. 2026</div>
+      </div>
+    </a>
+    <button class="idchip" id="idchip" onclick="UI.identity()">Sign in</button>
+  </div>
+  <nav class="nav" id="nav"></nav>
+</header>
+<main class="wrap" id="view"></main>
+<div id="modalroot"></div>
+<div id="toast"></div>
+
+
+<script>
+/* ================= TradeMark Fantasy League =================
+   Single-file app. Data lives in Supabase (shared) or localStorage (preview).
+   ============================================================ */
+
+/* ---- CONFIG: paste Supabase project values here ---- */
+const CONFIG = {
+  SUPABASE_URL: "https://sxfysguzvnuigrnahsbs.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4ZnlzZ3V6dm51aWdybmFoc2JzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMjE3MzEsImV4cCI6MjEwMjg5NzczMX0.bnmJarKrdsCfSYFLS8uO9iNZSiYugAvAVtYCPZXfG60"
+};
+/* ---------------------------------------------------- */
+
+const SEED = {"settings":{"league":{"name":"TradeMark Fantasy League","season":2026,"type":"Dynasty","buy_in":25,"pot":125,"teams":5},"scoring":{"td":6,"yds":0.1,"rec":1,"fum":-2,"solo":2,"ast":1,"sack":4,"intc":5,"pbu":2,"ffr":3},"roster_slots":{"RB":1,"WR":1,"DEF":1,"UTIL":1,"BE":3},"draft":{"style":"snake","rounds":7,"seconds_per_pick":30,"scheduled_at":"2026-08-24T16:10:00-04:00"},"season_dates":{"week1_sunday":"2026-09-13","lineup_lock":"Sundays 12:55 PM ET","reg_season_weeks":15,"playoff_weeks":[16,17]},"commish":{"team_id":1,"pin":"9999"},"payouts":{"note":"TBD by commissioner"},"final_weeks":[]},"teams":[{"id":1,"slot":1,"owner":"Charlie","name":"Team Charlie","pin":"1111"},{"id":2,"slot":2,"owner":"Ty","name":"Team Ty","pin":"2222"},{"id":3,"slot":3,"owner":"Zack","name":"Team Zack","pin":"3333"},{"id":4,"slot":4,"owner":"Chris","name":"Team Chris","pin":"4444"},{"id":5,"slot":5,"owner":"Dylan","name":"Team Dylan","pin":"5555"}],"players":[{"id":1,"rank":1,"name":"George Pickens","pos":"WR","nfl_team":"Dallas Cowboys","pts_2025":289.9,"rookie":false},{"id":2,"rank":2,"name":"Cedric Gray","pos":"LB","nfl_team":"Tennessee Titans","pts_2025":276,"rookie":false},{"id":3,"rank":3,"name":"Zay Flowers","pos":"WR","nfl_team":"Baltimore Ravens","pts_2025":237.1,"rookie":false},{"id":4,"rank":4,"name":"Saquon Barkley","pos":"RB","nfl_team":"Philadelphia Eagles","pts_2025":232.3,"rookie":false},{"id":5,"rank":5,"name":"Wan'Dale Robinson","pos":"WR","nfl_team":"Tennessee Titans","pts_2025":217.4,"rookie":false},{"id":6,"rank":6,"name":"Jordan Battle","pos":"S","nfl_team":"Cincinnati Bengals","pts_2025":217,"rookie":false},{"id":7,"rank":7,"name":"Tetairoa McMillan","pos":"WR","nfl_team":"Carolina Panthers","pts_2025":213.4,"rookie":false},{"id":8,"rank":8,"name":"Stefon Diggs","pos":"WR","nfl_team":"Washington Commanders","pts_2025":210.3,"rookie":false},{"id":9,"rank":9,"name":"Dane Belton","pos":"S","nfl_team":"New York Jets","pts_2025":210,"rookie":false},{"id":10,"rank":10,"name":"Justin Jefferson","pos":"WR","nfl_team":"Minnesota Vikings","pts_2025":200.8,"rookie":false},{"id":11,"rank":11,"name":"CeeDee Lamb","pos":"WR","nfl_team":"Dallas Cowboys","pts_2025":200.7,"rookie":false},{"id":12,"rank":12,"name":"Mike Jackson","pos":"CB","nfl_team":"Carolina Panthers","pts_2025":175,"rookie":false},{"id":13,"rank":13,"name":"Maxx Crosby","pos":"DE","nfl_team":"Las Vegas Raiders","pts_2025":166,"rookie":false},{"id":14,"rank":14,"name":"Kamren Kinchens","pos":"S","nfl_team":"Los Angeles Rams","pts_2025":164,"rookie":false},{"id":15,"rank":15,"name":"Romeo Doubs","pos":"WR","nfl_team":"New England Patriots","pts_2025":163.4,"rookie":false},{"id":16,"rank":16,"name":"Tyrone Tracy Jr.","pos":"RB","nfl_team":"New York Giants","pts_2025":162.8,"rookie":false},{"id":17,"rank":17,"name":"DJ Moore","pos":"WR","nfl_team":"Buffalo Bills","pts_2025":154.2,"rookie":false},{"id":18,"rank":18,"name":"Paulson Adebo","pos":"CB","nfl_team":"New York Giants","pts_2025":148,"rookie":false},{"id":19,"rank":19,"name":"Josh Metellus","pos":"S","nfl_team":"Minnesota Vikings","pts_2025":148,"rookie":false},{"id":20,"rank":20,"name":"Rashee Rice","pos":"WR","nfl_team":"Kansas City Chiefs","pts_2025":146.1,"rookie":false},{"id":21,"rank":21,"name":"Kyle Monangai","pos":"RB","nfl_team":"Chicago Bears","pts_2025":142.7,"rookie":false},{"id":22,"rank":22,"name":"Jordan Mason","pos":"RB","nfl_team":"Minnesota Vikings","pts_2025":130.9,"rookie":false},{"id":23,"rank":23,"name":"Jayden Higgins","pos":"WR","nfl_team":"Houston Texans","pts_2025":129.5,"rookie":false},{"id":24,"rank":24,"name":"Jerry Jeudy","pos":"WR","nfl_team":"Cleveland Browns","pts_2025":122.2,"rookie":false},{"id":25,"rank":25,"name":"Cody Simon","pos":"LB","nfl_team":"Arizona Cardinals","pts_2025":115,"rookie":false},{"id":26,"rank":26,"name":"Tyrique Stevenson","pos":"CB","nfl_team":"Chicago Bears","pts_2025":114,"rookie":false},{"id":27,"rank":27,"name":"Gregory Rousseau","pos":"DE","nfl_team":"Buffalo Bills","pts_2025":105,"rookie":false},{"id":28,"rank":28,"name":"Garrett Wilson","pos":"WR","nfl_team":"New York Jets","pts_2025":99.5,"rookie":false},{"id":29,"rank":29,"name":"Zonovan \"Bam\" Knight","pos":"RB","nfl_team":"Arizona Cardinals","pts_2025":94.9,"rookie":false},{"id":30,"rank":30,"name":"Andrei Iosivas","pos":"WR","nfl_team":"Cincinnati Bengals","pts_2025":88.5,"rookie":false},{"id":31,"rank":31,"name":"Lathan Ransom","pos":"S","nfl_team":"Carolina Panthers","pts_2025":86,"rookie":false},{"id":32,"rank":32,"name":"Alex Wright","pos":"DE","nfl_team":"Cleveland Browns","pts_2025":85,"rookie":false},{"id":33,"rank":33,"name":"Sauce Gardner","pos":"CB","nfl_team":"Indianapolis Colts","pts_2025":82,"rookie":false},{"id":34,"rank":34,"name":"Jermaine Johnson II","pos":"DE","nfl_team":"Tennessee Titans","pts_2025":81,"rookie":false},{"id":35,"rank":35,"name":"Dontayvion Wicks","pos":"WR","nfl_team":"Philadelphia Eagles","pts_2025":75.2,"rookie":false},{"id":36,"rank":36,"name":"Deone Walker","pos":"DT","nfl_team":"Buffalo Bills","pts_2025":71,"rookie":false},{"id":37,"rank":37,"name":"Christian Kirk","pos":"WR","nfl_team":"San Francisco 49ers","pts_2025":57.9,"rookie":false},{"id":38,"rank":38,"name":"Keaton Mitchell","pos":"RB","nfl_team":"Los Angeles Chargers","pts_2025":55.4,"rookie":false},{"id":39,"rank":39,"name":"Dante Stills","pos":"DT","nfl_team":"Arizona Cardinals","pts_2025":53,"rookie":false},{"id":40,"rank":40,"name":"David Sills","pos":"WR","nfl_team":"Tampa Bay Buccaneers","pts_2025":49.1,"rookie":false},{"id":41,"rank":41,"name":"Audric Estime","pos":"RB","nfl_team":"New Orleans Saints","pts_2025":48.1,"rookie":false},{"id":42,"rank":42,"name":"Jayden Reed","pos":"WR","nfl_team":"Green Bay Packers","pts_2025":45.7,"rookie":false},{"id":43,"rank":43,"name":"Cam Taylor-Britt","pos":"CB","nfl_team":"Indianapolis Colts","pts_2025":43,"rookie":false},{"id":44,"rank":44,"name":"Bo Melton","pos":"WR","nfl_team":"Green Bay Packers","pts_2025":20.7,"rookie":false},{"id":45,"rank":45,"name":"Kyler Gordon","pos":"CB","nfl_team":"Chicago Bears","pts_2025":19,"rookie":false},{"id":46,"rank":46,"name":"Braelon Allen","pos":"RB","nfl_team":"New York Jets","pts_2025":17.3,"rookie":false},{"id":47,"rank":47,"name":"Leonard Taylor","pos":"DT","nfl_team":"New England Patriots","pts_2025":16,"rookie":false},{"id":48,"rank":48,"name":"Xavier Restrepo","pos":"WR","nfl_team":"Tennessee Titans","pts_2025":7.1,"rookie":false},{"id":49,"rank":49,"name":"Storm Duck","pos":"CB","nfl_team":"Miami Dolphins","pts_2025":5,"rookie":false},{"id":50,"rank":50,"name":"DeeJay Dallas","pos":"RB","nfl_team":"Jacksonville Jaguars","pts_2025":2.1,"rookie":false},{"id":51,"rank":51,"name":"Amani Oruwariye","pos":"CB","nfl_team":"Baltimore Ravens","pts_2025":0,"rookie":false},{"id":52,"rank":52,"name":"Rueben Bain Jr.","pos":"DE","nfl_team":"Tampa Bay Buccaneers","pts_2025":null,"rookie":true},{"id":53,"rank":53,"name":"Elijah Sarratt","pos":"WR","nfl_team":"Baltimore Ravens","pts_2025":null,"rookie":true},{"id":54,"rank":54,"name":"Colbie Young","pos":"WR","nfl_team":"Cincinnati Bengals","pts_2025":null,"rookie":true}],"schedule":[{"week":1,"game":1,"team_a":2,"team_b":5,"bye":null,"label":null},{"week":1,"game":2,"team_a":3,"team_b":4,"bye":null,"label":null},{"week":1,"game":0,"team_a":null,"team_b":null,"bye":1,"label":null},{"week":2,"game":1,"team_a":1,"team_b":5,"bye":null,"label":null},{"week":2,"game":2,"team_a":2,"team_b":3,"bye":null,"label":null},{"week":2,"game":0,"team_a":null,"team_b":null,"bye":4,"label":null},{"week":3,"game":1,"team_a":1,"team_b":4,"bye":null,"label":null},{"week":3,"game":2,"team_a":5,"team_b":3,"bye":null,"label":null},{"week":3,"game":0,"team_a":null,"team_b":null,"bye":2,"label":null},{"week":4,"game":1,"team_a":1,"team_b":3,"bye":null,"label":null},{"week":4,"game":2,"team_a":4,"team_b":2,"bye":null,"label":null},{"week":4,"game":0,"team_a":null,"team_b":null,"bye":5,"label":null},{"week":5,"game":1,"team_a":1,"team_b":2,"bye":null,"label":null},{"week":5,"game":2,"team_a":4,"team_b":5,"bye":null,"label":null},{"week":5,"game":0,"team_a":null,"team_b":null,"bye":3,"label":null},{"week":6,"game":1,"team_a":2,"team_b":5,"bye":null,"label":null},{"week":6,"game":2,"team_a":3,"team_b":4,"bye":null,"label":null},{"week":6,"game":0,"team_a":null,"team_b":null,"bye":1,"label":null},{"week":7,"game":1,"team_a":1,"team_b":5,"bye":null,"label":null},{"week":7,"game":2,"team_a":2,"team_b":3,"bye":null,"label":null},{"week":7,"game":0,"team_a":null,"team_b":null,"bye":4,"label":null},{"week":8,"game":1,"team_a":1,"team_b":4,"bye":null,"label":null},{"week":8,"game":2,"team_a":5,"team_b":3,"bye":null,"label":null},{"week":8,"game":0,"team_a":null,"team_b":null,"bye":2,"label":null},{"week":9,"game":1,"team_a":1,"team_b":3,"bye":null,"label":null},{"week":9,"game":2,"team_a":4,"team_b":2,"bye":null,"label":null},{"week":9,"game":0,"team_a":null,"team_b":null,"bye":5,"label":null},{"week":10,"game":1,"team_a":1,"team_b":2,"bye":null,"label":null},{"week":10,"game":2,"team_a":4,"team_b":5,"bye":null,"label":null},{"week":10,"game":0,"team_a":null,"team_b":null,"bye":3,"label":null},{"week":11,"game":1,"team_a":2,"team_b":5,"bye":null,"label":null},{"week":11,"game":2,"team_a":3,"team_b":4,"bye":null,"label":null},{"week":11,"game":0,"team_a":null,"team_b":null,"bye":1,"label":null},{"week":12,"game":1,"team_a":1,"team_b":5,"bye":null,"label":null},{"week":12,"game":2,"team_a":2,"team_b":3,"bye":null,"label":null},{"week":12,"game":0,"team_a":null,"team_b":null,"bye":4,"label":null},{"week":13,"game":1,"team_a":1,"team_b":4,"bye":null,"label":null},{"week":13,"game":2,"team_a":5,"team_b":3,"bye":null,"label":null},{"week":13,"game":0,"team_a":null,"team_b":null,"bye":2,"label":null},{"week":14,"game":1,"team_a":1,"team_b":3,"bye":null,"label":null},{"week":14,"game":2,"team_a":4,"team_b":2,"bye":null,"label":null},{"week":14,"game":0,"team_a":null,"team_b":null,"bye":5,"label":null},{"week":15,"game":1,"team_a":1,"team_b":2,"bye":null,"label":null},{"week":15,"game":2,"team_a":4,"team_b":5,"bye":null,"label":null},{"week":15,"game":0,"team_a":null,"team_b":null,"bye":3,"label":null},{"week":16,"game":1,"team_a":null,"team_b":null,"bye":null,"label":"Semifinal: 1 seed vs 4 seed"},{"week":16,"game":2,"team_a":null,"team_b":null,"bye":null,"label":"Semifinal: 2 seed vs 3 seed"},{"week":17,"game":1,"team_a":null,"team_b":null,"bye":null,"label":"Championship"},{"week":17,"game":2,"team_a":null,"team_b":null,"bye":null,"label":"3rd Place Game"}]};
+
+/* ---------- utils ---------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
+const byId = (arr) => Object.fromEntries(arr.map(x => [x.id, x]));
+function toast(msg, ms = 2600) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", ms);
+}
+function tmName(team) { return `${esc(team.name)}<span class="tm">™</span>`; }
+
+/* Eastern-time wall clock -> Date (handles EDT/EST) */
+function etDate(y, mo, d, h, mi) {
+  for (const off of [4, 5]) {
+    const cand = new Date(Date.UTC(y, mo, d, h + off, mi));
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit" }).format(cand);
+    if (parseInt(parts, 10) % 24 === h % 24) return cand;
+  }
+  return new Date(Date.UTC(y, mo, d, h + 5, mi));
+}
+
+/* ---------- league math ---------- */
+const DEF_POS = ["LB", "S", "CB", "DE", "DT"];
+const TOTAL_TEAMS = 5, ROUNDS = 7, TOTAL_PICKS = TOTAL_TEAMS * ROUNDS, PICK_SECONDS = 30;
+
+function pickInfo(pickNo) { // 1-indexed -> {round, slotIndex, slot}
+  const round = Math.ceil(pickNo / TOTAL_TEAMS);
+  const idx = (pickNo - 1) % TOTAL_TEAMS;
+  const slot = (round % 2 === 1) ? idx + 1 : TOTAL_TEAMS - idx;
+  return { round, slot };
+}
+function teamBySlot(state, slot) { return state.teams.find(t => t.slot === slot); }
+function onClockTeam(state) {
+  const p = state.picks.length + 1;
+  if (p > TOTAL_PICKS) return null;
+  return teamBySlot(state, pickInfo(p).slot);
+}
+function availablePlayers(state) {
+  const taken = new Set(state.roster.map(r => r.player_id));
+  return state.players.filter(p => !taken.has(p.id)).sort((a, b) => a.rank - b.rank);
+}
+function rosterOf(state, teamId) {
+  const ids = state.roster.filter(r => r.team_id === teamId).map(r => r.player_id);
+  const pm = byId(state.players);
+  return ids.map(id => pm[id]).filter(Boolean).sort((a, b) => a.rank - b.rank);
+}
+function playerOwner(state, playerId) {
+  const r = state.roster.find(r => r.player_id === playerId);
+  return r ? state.teams.find(t => t.id === r.team_id) : null;
+}
+
+/* scoring */
+function statPoints(s, sc) {
+  if (!s) return 0;
+  return (s.td||0)*sc.td + (s.yds||0)*sc.yds + (s.rec||0)*sc.rec + (s.fum||0)*sc.fum +
+         (s.solo||0)*sc.solo + (s.ast||0)*sc.ast + (s.sack||0)*sc.sack +
+         (s.intc||0)*sc.intc + (s.pbu||0)*sc.pbu + (s.ffr||0)*sc.ffr;
+}
+function playerWeekPoints(state, playerId, week) {
+  const s = state.stats.find(x => x.player_id === playerId && x.week === week);
+  return statPoints(s, state.settings.scoring);
+}
+
+/* lineup: stored row or deterministic auto-lineup (best 2025 pts filling RB/WR/DEF/UTIL) */
+function autoLineup(state, teamId) {
+  const ros = rosterOf(state, teamId);
+  const take = (pred, used) => {
+    const c = ros.filter(p => pred(p) && !used.has(p.id)).sort((a, b) => (b.pts_2025 ?? -1) - (a.pts_2025 ?? -1))[0];
+    if (c) used.add(c.id);
+    return c ? c.id : null;
+  };
+  const used = new Set();
+  const rb = take(p => p.pos === "RB", used);
+  const wr = take(p => p.pos === "WR", used);
+  const def = take(p => DEF_POS.includes(p.pos), used);
+  const util = take(() => true, used);
+  return { rb, wr, def, util, auto: true };
+}
+function lineupFor(state, teamId, week) {
+  const row = state.lineups.find(l => l.team_id === teamId && l.week === week);
+  if (row && (row.rb || row.wr || row.def || row.util)) return { rb: row.rb, wr: row.wr, def: row.def, util: row.util, auto: false, locked: row.locked };
+  return autoLineup(state, teamId);
+}
+function teamWeekScore(state, teamId, week) {
+  const lu = lineupFor(state, teamId, week);
+  let total = 0;
+  for (const pid of [lu.rb, lu.wr, lu.def, lu.util]) if (pid) total += playerWeekPoints(state, pid, week);
+  return total;
+}
+
+/* schedule + standings */
+function weekGames(state, week) { return state.schedule.filter(s => s.week === week && s.game > 0); }
+function weekBye(state, week) { const b = state.schedule.find(s => s.week === week && s.game === 0); return b ? b.bye : null; }
+function finalWeeks(state) { return state.settings.final_weeks || []; }
+function standings(state) {
+  const rows = state.teams.map(t => ({ team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0 }));
+  const rm = Object.fromEntries(rows.map(r => [r.team.id, r]));
+  for (const wk of finalWeeks(state)) {
+    if (wk > state.settings.season_dates.reg_season_weeks) continue;
+    for (const g of weekGames(state, wk)) {
+      if (!g.team_a || !g.team_b) continue;
+      const sa = teamWeekScore(state, g.team_a, wk), sb = teamWeekScore(state, g.team_b, wk);
+      rm[g.team_a].pf += sa; rm[g.team_a].pa += sb;
+      rm[g.team_b].pf += sb; rm[g.team_b].pa += sa;
+      if (sa > sb) { rm[g.team_a].w++; rm[g.team_b].l++; }
+      else if (sb > sa) { rm[g.team_b].w++; rm[g.team_a].l++; }
+      else { rm[g.team_a].t++; rm[g.team_b].t++; }
+    }
+  }
+  rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf));
+  return rows;
+}
+
+/* lineup lock time: Sundays 12:55 PM ET, week 1 Sunday from settings */
+function lockTime(state, week) {
+  const [y, m, d] = state.settings.season_dates.week1_sunday.split("-").map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d + (week - 1) * 7, 12, 0));
+  return etDate(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 12, 55);
+}
+function weekIsLocked(state, teamId, week) {
+  const row = state.lineups.find(l => l.team_id === teamId && l.week === week);
+  if (row && row.locked) return true;
+  return Date.now() > lockTime(state, week).getTime();
+}
+
+/* current fantasy week (for default selectors) */
+function currentWeek(state) {
+  const [y, m, d] = state.settings.season_dates.week1_sunday.split("-").map(Number);
+  const wk1kick = etDate(y, m - 1, d - 3, 0, 0); // Thursday of week 1
+  const diff = Math.floor((Date.now() - wk1kick.getTime()) / (7 * 86400000));
+  return Math.min(Math.max(diff + 1, 1), 17);
+}
+
+/* ============================================================
+   STORES: identical async API. SupaStore (shared) / LocalStore (preview).
+   ============================================================ */
+function emptyState() {
+  return { settings: {}, teams: [], players: [], draft: { status: "pre", deadline: null, remaining_ms: null },
+           picks: [], roster: [], txns: [], lineups: [], schedule: [], stats: [] };
+}
+
+/* ---------- LocalStore (single-device preview) ---------- */
+const LocalStore = {
+  name: "local",
+  _key: "tmfl_local_v1",
+  _load() {
+    const raw = localStorage.getItem(this._key);
+    if (raw) { try { return JSON.parse(raw); } catch (e) {} }
+    const s = emptyState();
+    s.settings = JSON.parse(JSON.stringify(SEED.settings));
+    s.teams = JSON.parse(JSON.stringify(SEED.teams));
+    s.players = JSON.parse(JSON.stringify(SEED.players));
+    s.schedule = JSON.parse(JSON.stringify(SEED.schedule));
+    this._save(s);
+    return s;
+  },
+  _save(s) { localStorage.setItem(this._key, JSON.stringify(s)); },
+  async init() { return this._load(); },
+  async refresh() { return this._load(); },
+  subscribe() {},
+  async _mut(fn) { const s = this._load(); fn(s); this._save(s); return s; },
+  async setDraft(patch) { return this._mut(s => Object.assign(s.draft, patch)); },
+  async makePick(pick, rosterRow, draftPatch) {
+    return this._mut(s => {
+      if (s.picks.some(p => p.pick_no === pick.pick_no)) throw new Error("Pick already made");
+      if (s.roster.some(r => r.player_id === pick.player_id)) throw new Error("Player taken");
+      s.picks.push(pick); s.roster.push(rosterRow); Object.assign(s.draft, draftPatch);
+    });
+  },
+  async undoPick() {
+    return this._mut(s => {
+      const last = s.picks.sort((a, b) => a.pick_no - b.pick_no).pop();
+      if (last) s.roster = s.roster.filter(r => r.player_id !== last.player_id);
+    });
+  },
+  async addDrop(teamId, addId, dropId) {
+    return this._mut(s => {
+      if (dropId) s.roster = s.roster.filter(r => r.player_id !== dropId);
+      if (addId) {
+        if (s.roster.some(r => r.player_id === addId)) throw new Error("Player taken");
+        s.roster.push({ player_id: addId, team_id: teamId, acquired: "fa" });
+      }
+      s.txns.unshift({ id: Date.now(), team_id: teamId, add_player_id: addId, drop_player_id: dropId, created_at: new Date().toISOString() });
+    });
+  },
+  async setLineup(teamId, week, slots) {
+    return this._mut(s => {
+      s.lineups = s.lineups.filter(l => !(l.team_id === teamId && l.week === week));
+      s.lineups.push({ team_id: teamId, week, ...slots, locked: false });
+    });
+  },
+  async lockLineups(week, locked) {
+    return this._mut(s => {
+      for (const t of s.teams) {
+        let row = s.lineups.find(l => l.team_id === t.id && l.week === week);
+        if (!row) { const a = autoLineup(s, t.id); row = { team_id: t.id, week, rb: a.rb, wr: a.wr, def: a.def, util: a.util }; s.lineups.push(row); }
+        row.locked = locked;
+      }
+    });
+  },
+  async saveStats(rows) {
+    return this._mut(s => {
+      for (const r of rows) {
+        s.stats = s.stats.filter(x => !(x.player_id === r.player_id && x.week === r.week));
+        s.stats.push(r);
+      }
+    });
+  },
+  async saveSetting(key, value) { return this._mut(s => { s.settings[key] = value; }); },
+  async updateTeam(teamId, patch) { return this._mut(s => Object.assign(s.teams.find(t => t.id === teamId), patch)); },
+  async updateScheduleGame(week, game, patch) {
+    return this._mut(s => Object.assign(s.schedule.find(x => x.week === week && x.game === game), patch));
+  },
+  async resetDraft() {
+    return this._mut(s => {
+      s.picks = []; s.roster = []; s.txns = []; s.lineups = []; s.stats = [];
+      s.draft = { status: "pre", deadline: null, remaining_ms: null };
+    });
+  }
+};
+
+/* ---------- SupaStore (shared database) ---------- */
+const SupaStore = {
+  name: "supabase",
+  client: null,
+  async init() {
+    this.client = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    return this.refresh();
+  },
+  async refresh() {
+    const c = this.client;
+    const q = (t, sel = "*") => c.from(t).select(sel);
+    const [settings, teams, players, draft, picks, roster, txns, lineups, schedule, stats] = await Promise.all([
+      q("league_settings"), q("teams"), q("players"), q("draft_state"), q("picks"),
+      q("roster"), c.from("transactions").select("*").order("created_at", { ascending: false }).limit(60),
+      q("lineups"), q("schedule"), q("player_stats")
+    ]);
+    for (const r of [settings, teams, players, draft, picks, roster, txns, lineups, schedule, stats])
+      if (r.error) throw r.error;
+    const st = emptyState();
+    st.settings = Object.fromEntries(settings.data.map(x => [x.key, x.value]));
+    st.teams = teams.data.sort((a, b) => a.slot - b.slot);
+    st.players = players.data.sort((a, b) => a.rank - b.rank);
+    st.draft = draft.data[0] || st.draft;
+    st.picks = picks.data.sort((a, b) => a.pick_no - b.pick_no);
+    st.roster = roster.data;
+    st.txns = txns.data;
+    st.lineups = lineups.data;
+    st.schedule = schedule.data;
+    st.stats = stats.data;
+    return st;
+  },
+  subscribe(onChange) {
+    this.client.channel("tmfl").on("postgres_changes", { event: "*", schema: "public" }, () => onChange()).subscribe();
+  },
+  async setDraft(patch) {
+    const { error } = await this.client.from("draft_state").update(patch).eq("id", 1);
+    if (error) throw error;
+  },
+  async makePick(pick, rosterRow, draftPatch) {
+    let r = await this.client.from("picks").insert(pick);
+    if (r.error) throw new Error("Pick collision, board refreshed");
+    r = await this.client.from("roster").insert(rosterRow);
+    if (r.error && !String(r.error.message).includes("duplicate")) throw r.error;
+    await this.setDraft(draftPatch);
+  },
+  async undoPick() {
+    const { data } = await this.client.from("picks").select("*").order("pick_no", { ascending: false }).limit(1);
+    if (!data || !data.length) return;
+    const last = data[0];
+    await this.client.from("roster").delete().eq("player_id", last.player_id);
+    await this.client.from("picks").delete().eq("pick_no", last.pick_no);
+  },
+  async addDrop(teamId, addId, dropId) {
+    if (dropId) {
+      const { error } = await this.client.from("roster").delete().eq("player_id", dropId).eq("team_id", teamId);
+      if (error) throw error;
+    }
+    if (addId) {
+      const { error } = await this.client.from("roster").insert({ player_id: addId, team_id: teamId, acquired: "fa" });
+      if (error) throw new Error("Too slow, someone else grabbed them");
+    }
+    await this.client.from("transactions").insert({ team_id: teamId, add_player_id: addId, drop_player_id: dropId });
+  },
+  async setLineup(teamId, week, slots) {
+    const { error } = await this.client.from("lineups").upsert({ team_id: teamId, week, ...slots, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  },
+  async lockLineups(week, locked) {
+    for (const t of App.state.teams) {
+      const lu = lineupFor(App.state, t.id, week);
+      const { error } = await this.client.from("lineups").upsert({ team_id: t.id, week, rb: lu.rb, wr: lu.wr, def: lu.def, util: lu.util, locked });
+      if (error) throw error;
+    }
+  },
+  async saveStats(rows) {
+    const { error } = await this.client.from("player_stats").upsert(rows);
+    if (error) throw error;
+  },
+  async saveSetting(key, value) {
+    const { error } = await this.client.from("league_settings").upsert({ key, value });
+    if (error) throw error;
+  },
+  async updateTeam(teamId, patch) {
+    const { error } = await this.client.from("teams").update(patch).eq("id", teamId);
+    if (error) throw error;
+  },
+  async updateScheduleGame(week, game, patch) {
+    const { error } = await this.client.from("schedule").update(patch).eq("week", week).eq("game", game);
+    if (error) throw error;
+  },
+  async resetDraft() {
+    const c = this.client;
+    await c.from("player_stats").delete().neq("week", -1);
+    await c.from("lineups").delete().neq("week", -1);
+    await c.from("transactions").delete().neq("id", -1);
+    await c.from("roster").delete().neq("player_id", -1);
+    await c.from("picks").delete().neq("pick_no", -1);
+    await c.from("draft_state").update({ status: "pre", deadline: null, remaining_ms: null }).eq("id", 1);
+  }
+};
+
+</script>
+<script>
+/* ============================================================
+   App controller
+   ============================================================ */
+const App = {
+  store: null, state: null, tab: "draft", dirty: false,
+  me() { const raw = localStorage.getItem("tmfl_id"); if (!raw) return null; try { return JSON.parse(raw).team_id; } catch (e) { return null; } },
+  myTeam() { const id = this.me(); return id ? this.state.teams.find(t => t.id === id) : null; },
+  isCommish() { return sessionStorage.getItem("tmfl_commish") === "1"; },
+
+  async boot() {
+    this.store = (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) ? SupaStore : LocalStore;
+    if (this.store === LocalStore) $("previewbar").style.display = "block";
+    try { this.state = await this.store.init(); }
+    catch (e) { $("view").innerHTML = `<div class="card"><h2>Connection problem</h2><p>${esc(e.message)}</p><p class="sub">Check the Supabase URL and key in the file config, then reload.</p></div>`; return; }
+    this.store.subscribe(() => this.queueRefresh());
+    UI.nav();
+    window.addEventListener("hashchange", () => this.go());
+    this.go();
+    setInterval(() => this.pollTick(), 1000);
+    setInterval(() => Draft.tick(), 400);
+  },
+  go() {
+    const t = (location.hash || "#draft").slice(1);
+    this.tab = ["draft","team","rosters","players","matchups","standings","league","admin"].includes(t) ? t : "draft";
+    UI.nav(); UI.render();
+  },
+  _lastPoll: 0, _refreshing: false, _queued: false,
+  pollTick() {
+    const live = this.state && (this.state.draft.status === "live" || this.state.draft.status === "paused");
+    const every = (live || this.tab === "draft") ? 3000 : 25000;
+    if (Date.now() - this._lastPoll >= every) this.queueRefresh();
+  },
+  async queueRefresh() {
+    if (this._refreshing) { this._queued = true; return; }
+    this._refreshing = true; this._lastPoll = Date.now();
+    try {
+      const st = await this.store.refresh();
+      const changed = JSON.stringify(st) !== JSON.stringify(this.state);
+      this.state = st;
+      if (changed) {
+        const ae = document.activeElement;
+        const editing = ae && ["INPUT","SELECT","TEXTAREA"].includes(ae.tagName) && $("view").contains(ae);
+        if (editing) { this.dirty = true; } else { UI.render(); }
+      }
+    } catch (e) { /* transient network; keep last state */ }
+    this._refreshing = false;
+    if (this._queued) { this._queued = false; this.queueRefresh(); }
+  },
+  async mutate(fn, okMsg) {
+    try { await fn(); if (okMsg) toast(okMsg); }
+    catch (e) { toast(e.message || "That didn't go through"); }
+    await this.queueRefresh();
+    UI.render();
+  }
+};
+
+/* ============================================================
+   Draft engine
+   ============================================================ */
+const Draft = {
+  _lastAuto: 0,
+  deadlineMs() { const d = App.state.draft.deadline; return d ? new Date(d).getTime() : null; },
+  secondsLeft() {
+    const dl = this.deadlineMs(); if (!dl) return null;
+    return Math.max(0, Math.ceil((dl - Date.now()) / 1000));
+  },
+  tick() {
+    if (!App.state) return;
+    const st = App.state.draft.status;
+    if (App.tab === "draft" && st === "live") {
+      const el = $("clock");
+      if (el) { const s = this.secondsLeft(); el.textContent = ":" + String(s ?? 0).padStart(2, "0"); el.classList.toggle("hot", s !== null && s <= 10); }
+      const cd = $("count-n"); if (cd) UI.countdownTick();
+      this.maybeAutopick();
+    }
+    if (App.tab === "draft" && st === "pre") UI.countdownTick();
+  },
+  async maybeAutopick() {
+    const s = App.state;
+    if (s.draft.status !== "live" || s.picks.length >= TOTAL_PICKS) return;
+    const dl = this.deadlineMs();
+    if (!dl || Date.now() < dl + 2500) return;
+    if (Date.now() - this._lastAuto < 4000) return;
+    this._lastAuto = Date.now();
+    await App.queueRefresh();
+    const s2 = App.state;
+    const dl2 = s2.draft.deadline ? new Date(s2.draft.deadline).getTime() : null;
+    if (s2.draft.status !== "live" || !dl2 || Date.now() < dl2 + 2500 || s2.picks.length >= TOTAL_PICKS) return;
+    const team = onClockTeam(s2);
+    const best = availablePlayers(s2)[0];
+    if (team && best) await this.executePick(best.id, true, true);
+  },
+  async executePick(playerId, auto = false, silent = false) {
+    const s = App.state;
+    const pickNo = s.picks.length + 1;
+    if (s.draft.status !== "live" || pickNo > TOTAL_PICKS) return;
+    const { round, slot } = pickInfo(pickNo);
+    const team = teamBySlot(s, slot);
+    if (!auto && App.me() !== team.id && !App.isCommish()) { toast("Not your pick"); return; }
+    if (s.roster.some(r => r.player_id === playerId)) { toast("Already taken"); return; }
+    const player = s.players.find(p => p.id === playerId);
+    const done = pickNo === TOTAL_PICKS;
+    const patch = done ? { status: "done", deadline: null } : { deadline: new Date(Date.now() + PICK_SECONDS * 1000).toISOString() };
+    const pickRow = { pick_no: pickNo, round, slot, team_id: team.id, player_id: playerId, auto };
+    const rosterRow = { player_id: playerId, team_id: team.id, acquired: "draft" };
+    if (auto) {
+      try { await App.store.makePick(pickRow, rosterRow, patch); } catch (e) { /* another client got it first */ }
+      await App.queueRefresh(); UI.render();
+    } else {
+      await App.mutate(() => App.store.makePick(pickRow, rosterRow, patch), silent ? null : `${team.owner} drafts ${player.name}`);
+    }
+    if (done) toast("Draft complete. Rosters are set, everyone else hits free agency.");
+  },
+  async start() {
+    await App.mutate(() => App.store.setDraft({ status: "live", deadline: new Date(Date.now() + PICK_SECONDS * 1000).toISOString(), remaining_ms: null }), "Draft is live");
+  },
+  async pause() {
+    const dl = this.deadlineMs();
+    await App.mutate(() => App.store.setDraft({ status: "paused", remaining_ms: dl ? Math.max(3000, dl - Date.now()) : PICK_SECONDS * 1000 }), "Paused");
+  },
+  async resume() {
+    const rem = App.state.draft.remaining_ms || PICK_SECONDS * 1000;
+    await App.mutate(() => App.store.setDraft({ status: "live", deadline: new Date(Date.now() + rem).toISOString(), remaining_ms: null }), "Back live");
+  },
+  async undo() {
+    await App.mutate(async () => {
+      await App.store.undoPick();
+      await App.store.setDraft({ status: App.state.picks.length <= 1 ? "live" : "live", deadline: new Date(Date.now() + PICK_SECONDS * 1000).toISOString() });
+    }, "Last pick undone");
+  }
+};
+
+/* ============================================================
+   UI
+   ============================================================ */
+const UI = {
+  tabs: [["draft","Draft"],["team","My Team"],["rosters","Rosters"],["players","Players"],["matchups","Matchups"],["standings","Standings"],["league","League"],["admin","Admin"]],
+  nav() {
+    $("nav").innerHTML = this.tabs.map(([id, label]) =>
+      `<button class="${App.tab === id ? "on" : ""}" onclick="location.hash='${id}'">${label}</button>`).join("");
+    const me = App.myTeam();
+    $("idchip").innerHTML = me ? `<b>${esc(me.owner)}</b> &middot; ${esc(me.name)}<span class="tm">™</span>` : "Sign in";
+  },
+  render() {
+    if (!App.state) return;
+    App.dirty = false;
+    this.nav();
+    $("view").innerHTML = Views[App.tab]();
+    if (App.tab === "draft") this.countdownTick();
+  },
+
+  /* identity modal */
+  identity() {
+    const s = App.state;
+    const cur = App.me();
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal">
+          <h2>Who are you?</h2>
+          <div class="teampick">${s.teams.map(t =>
+            `<button class="${cur === t.id ? "on" : ""}" onclick="UI._pickTeam(${t.id},this)">${esc(t.owner)} <span class="sub" style="font-family:var(--body);font-size:12px;text-transform:none;letter-spacing:0"> ${esc(t.name)}™</span></button>`).join("")}
+          </div>
+          <div class="frow"><input id="pin-in" type="password" inputmode="numeric" placeholder="Team PIN" style="flex:1"></div>
+          <div class="btnrow">
+            <button class="btn gold" onclick="UI._signIn()">Sign in</button>
+            ${cur ? `<button class="btn" onclick="UI._signOut()">Sign out</button>` : ""}
+            <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    this._selTeam = cur;
+  },
+  _selTeam: null,
+  _pickTeam(id, btn) { this._selTeam = id; btn.parentElement.querySelectorAll("button").forEach(b => b.classList.remove("on")); btn.classList.add("on"); },
+  _signIn() {
+    const t = App.state.teams.find(x => x.id === this._selTeam);
+    const pin = $("pin-in").value.trim();
+    if (!t) { toast("Pick your team"); return; }
+    if (pin !== t.pin) { toast("Wrong PIN"); return; }
+    localStorage.setItem("tmfl_id", JSON.stringify({ team_id: t.id }));
+    this.closeModal(); this.render(); toast(`Signed in as ${t.owner}`);
+  },
+  _signOut() { localStorage.removeItem("tmfl_id"); this.closeModal(); this.render(); },
+  closeModal() { $("modalroot").innerHTML = ""; },
+
+  countdownTick() {
+    const el = $("count-wrap"); if (!el) return;
+    const at = new Date(App.state.settings.draft.scheduled_at).getTime();
+    let diff = Math.max(0, at - Date.now());
+    const d = Math.floor(diff / 86400000); diff -= d * 86400000;
+    const h = Math.floor(diff / 3600000); diff -= h * 3600000;
+    const m = Math.floor(diff / 60000); const s = Math.floor((diff - m * 60000) / 1000);
+    el.innerHTML = [[d,"days"],[h,"hrs"],[m,"min"],[s,"sec"]].map(([n,l]) =>
+      `<div class="u"><div class="n">${String(n).padStart(2,"0")}</div><div class="l">${l}</div></div>`).join("");
+  }
+};
+
+/* ============================================================
+   Views
+   ============================================================ */
+const Views = {
+
+  /* ---------- DRAFT ---------- */
+  draft() {
+    const s = App.state, st = s.draft.status;
+    if (st === "pre") return this._draftPre();
+    if (st === "done") return this._draftDone();
+    return this._draftLive();
+  },
+  _draftPre() {
+    const s = App.state;
+    const when = new Date(s.settings.draft.scheduled_at);
+    return `
+      <div class="card" style="text-align:center">
+        <h2>Draft Day</h2>
+        <p class="sub">${when.toLocaleString("en-US",{weekday:"long",month:"long",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:"America/New_York"})} ET &middot; Snake &middot; ${ROUNDS} rounds &middot; ${PICK_SECONDS}s per pick</p>
+        <div class="count" id="count-wrap"></div>
+        <p class="sub" style="margin-top:8px">Draft order: ${s.teams.map(t => esc(t.owner)).join(" &rarr; ")}</p>
+        ${App.isCommish() ? `<div class="btnrow" style="justify-content:center"><button class="btn gold" onclick="Draft.start()">Start the draft</button></div>` : `<p class="sub" style="margin-top:10px">Commissioner starts the draft from the Admin tab.</p>`}
+      </div>
+      ${this._bigBoardCard(false)}`;
+  },
+  _draftLive() {
+    const s = App.state;
+    const paused = s.draft.status === "paused";
+    const team = onClockTeam(s);
+    const pickNo = s.picks.length + 1;
+    const { round } = pickInfo(Math.min(pickNo, TOTAL_PICKS));
+    const meOn = team && App.me() === team.id;
+    const strip = [];
+    for (let p = pickNo; p < Math.min(pickNo + 6, TOTAL_PICKS + 1); p++) {
+      const t = teamBySlot(s, pickInfo(p).slot);
+      strip.push(`<div class="stop ${p === pickNo ? "now" : ""}"><div class="pk">RD ${pickInfo(p).round} &middot; PK ${p}</div><div class="tn">${esc(t.owner)}</div></div>`);
+    }
+    return `
+      <div class="otc ${paused ? "paused" : ""}">
+        <div>
+          <div class="lbl">${paused ? "Draft paused" : "On the clock"}</div>
+          <div class="who">${team ? esc(team.name) : ""}<span class="tm">™</span></div>
+          <div class="meta">Round ${round} &middot; Pick ${pickNo} of ${TOTAL_PICKS} &middot; ${esc(team ? team.owner : "")}</div>
+        </div>
+        <div class="clock" id="clock">${paused ? "&#10074;&#10074;" : ""}</div>
+      </div>
+      ${meOn && !paused ? `<div class="note">You're up. Hit Draft next to your guy below.</div>` : ""}
+      <div class="strip">${strip.join("")}</div>
+      ${App.isCommish() ? `<div class="btnrow" style="margin-bottom:12px">
+        ${paused ? `<button class="btn gold sm" onclick="Draft.resume()">Resume</button>` : `<button class="btn sm" onclick="Draft.pause()">Pause</button>`}
+        <button class="btn sm" onclick="if(confirm('Undo the last pick?'))Draft.undo()">Undo last pick</button>
+      </div>` : ""}
+      ${this._bigBoardCard(true)}
+      ${this._draftBoardCard()}`;
+  },
+  _draftDone() {
+    return `
+      <div class="card" style="text-align:center">
+        <h2>Draft Complete</h2>
+        <p class="sub">Rosters are locked in. Everyone undrafted is in free agency. Go set your Week 1 lineup on the My Team tab.</p>
+      </div>
+      ${this._draftBoardCard()}
+      ${this._bigBoardCard(false)}`;
+  },
+  _bigBoardCard(liveDraft) {
+    const s = App.state;
+    const q = (this._q || "").toLowerCase();
+    const posF = this._pos || "ALL";
+    const faOnly = !!this._fa;
+    const taken = new Set(s.roster.map(r => r.player_id));
+    let rows = s.players.filter(p =>
+      (!q || p.name.toLowerCase().includes(q) || p.nfl_team.toLowerCase().includes(q)) &&
+      (posF === "ALL" || (posF === "DEF" ? DEF_POS.includes(p.pos) : p.pos === posF)) &&
+      (!faOnly || !taken.has(p.id)));
+    const team = onClockTeam(s);
+    const canDraft = liveDraft && s.draft.status === "live" && team && (App.me() === team.id || App.isCommish());
+    const postDraft = s.draft.status === "done";
+    const me = App.myTeam();
+    const html = rows.map(p => {
+      const owner = playerOwner(s, p.id);
+      let action = "";
+      if (liveDraft && !owner) action = `<button class="btn gold sm" ${canDraft ? "" : "disabled"} onclick="Draft.executePick(${p.id})">Draft</button>`;
+      else if (postDraft && !owner && me) action = `<button class="btn sm" onclick="Views.addPlayer(${p.id})">Add</button>`;
+      const status = owner ? `<span class="pill own">${esc(owner.owner)}</span>` : `<span class="pill fa">FA</span>`;
+      return `<tr class="${owner && me && owner.id === me.id ? "mine" : ""}">
+        <td class="num">${p.rank}</td>
+        <td>${esc(p.name)} ${p.rookie ? '<span class="pill rk">R</span>' : ""}</td>
+        <td><span class="pill pos">${esc(p.pos)}</span></td>
+        <td class="sub">${esc(p.nfl_team)}</td>
+        <td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td>
+        <td>${status}</td><td>${action}</td></tr>`;
+    }).join("");
+    return `
+      <div class="card">
+        <h2>Big Board</h2>
+        <div class="frow">
+          <input id="bb-q" placeholder="Search player or team" value="${esc(this._q || "")}" oninput="Views.search(this.value)" style="flex:1;min-width:150px">
+          <select onchange="Views._pos=this.value;UI.render()">
+            ${["ALL","RB","WR","DEF"].map(p => `<option ${posF === p ? "selected" : ""}>${p}</option>`).join("")}
+          </select>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" ${faOnly ? "checked" : ""} onchange="Views._fa=this.checked;UI.render()"> FA only</label>
+        </div>
+        <div class="tablewrap"><table>
+          <tr><th class="num">RK</th><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025 Pts</th><th>Status</th><th></th></tr>
+          ${html || `<tr><td colspan="7" class="empty">No players match</td></tr>`}
+        </table></div>
+      </div>`;
+  },
+  _draftBoardCard() {
+    const s = App.state;
+    const pm = byId(s.players);
+    const pickMap = {};
+    for (const p of s.picks) pickMap[`${p.round}-${p.slot}`] = p;
+    let grid = `<div class="board" style="grid-template-columns:repeat(${TOTAL_TEAMS},1fr)">`;
+    grid += s.teams.map(t => `<div class="colhead">${esc(t.owner)}</div>`).join("");
+    for (let r = 1; r <= ROUNDS; r++) {
+      for (let sl = 1; sl <= TOTAL_TEAMS; sl++) {
+        const pk = pickMap[`${r}-${sl}`];
+        if (pk) {
+          const pl = pm[pk.player_id];
+          grid += `<div class="cell"><div class="p">${esc(pl.name)}</div><div class="m">${esc(pl.pos)} &middot; PK ${pk.pick_no}${pk.auto ? " &middot; AUTO" : ""}</div></div>`;
+        } else grid += `<div class="cell empty"><div class="m">RD ${r}</div></div>`;
+      }
+    }
+    grid += "</div>";
+    return `<div class="card"><h2>Draft Board</h2><div class="tablewrap" style="border:none;overflow-x:auto">${grid}</div></div>`;
+  },
+
+  search(q) {
+    this._q = q; UI.render();
+    const el = $("bb-q");
+    if (el) { el.focus(); el.setSelectionRange(q.length, q.length); }
+  },
+
+  /* ---------- add/drop ---------- */
+  confirmSwap(teamId, addId, dropId) {
+    UI.closeModal();
+    const pl = App.state.players.find(p => p.id === addId);
+    App.mutate(() => App.store.addDrop(teamId, addId, dropId), `Swapped in ${pl.name}`);
+  },
+  addPlayer(playerId) {
+    const s = App.state, me = App.myTeam();
+    if (!me) { UI.identity(); return; }
+    const mine = rosterOf(s, me.id);
+    const pl = s.players.find(p => p.id === playerId);
+    if (mine.length < 7) {
+      if (confirm(`Add ${pl.name} to ${me.name}?`)) App.mutate(() => App.store.addDrop(me.id, playerId, null), `${pl.name} added`);
+      return;
+    }
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal">
+          <h2>Roster full</h2>
+          <p class="sub" style="margin-bottom:10px">Drop someone to add ${esc(pl.name)}:</p>
+          <div class="teampick">${mine.map(p =>
+            `<button onclick="Views.confirmSwap(${me.id},${playerId},${p.id})">${esc(p.name)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}
+          </div>
+          <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+        </div>
+      </div>`;
+  },
+  dropPlayer(playerId) {
+    const s = App.state, me = App.myTeam();
+    const pl = s.players.find(p => p.id === playerId);
+    if (confirm(`Drop ${pl.name} to free agency?`)) App.mutate(() => App.store.addDrop(me.id, null, playerId), `${pl.name} dropped`);
+  },
+
+  /* ---------- MY TEAM ---------- */
+  _wk: null,
+  team() {
+    const s = App.state, me = App.myTeam();
+    if (!me) return `<div class="card"><h2>My Team</h2><p class="sub">Sign in to manage your squad.</p><div class="btnrow"><button class="btn gold" onclick="UI.identity()">Sign in</button></div></div>`;
+    const mine = rosterOf(s, me.id);
+    const row = standings(s).find(r => r.team.id === me.id);
+    const wk = this._wk || Math.min(currentWeek(s), 17);
+    const lu = lineupFor(s, me.id, wk);
+    const locked = weekIsLocked(s, me.id, wk);
+    const opts = (slotKey, elig) => {
+      const chosen = [lu.rb, lu.wr, lu.def, lu.util].filter(Boolean);
+      return `<option value="">Empty</option>` + mine.filter(p => elig(p)).map(p => {
+        const usedElsewhere = chosen.includes(p.id) && lu[slotKey] !== p.id;
+        return `<option value="${p.id}" ${lu[slotKey] === p.id ? "selected" : ""} ${usedElsewhere ? "disabled" : ""}>${esc(p.name)} (${esc(p.pos)})</option>`;
+      }).join("");
+    };
+    const slotRow = (tag, key, elig) => `
+      <div class="slot"><div class="tag">${tag}</div>
+        <select id="lu-${key}" ${locked ? "disabled" : ""} onchange="Views._luChange()">${opts(key, elig)}</select>
+        <div class="pt">${fmt1(lu[key] ? playerWeekPoints(s, lu[key], wk) : 0)}</div>
+      </div>`;
+    const benchIds = mine.filter(p => ![lu.rb, lu.wr, lu.def, lu.util].includes(p.id));
+    return `
+      <div class="card">
+        <h2>${tmName(me)}</h2>
+        <p class="sub">${esc(me.owner)} &middot; Record ${row.w}-${row.l}${row.t ? "-" + row.t : ""} &middot; PF ${fmt1(row.pf)}</p>
+      </div>
+      <div class="card">
+        <h2>Lineup</h2>
+        <div class="frow">
+          <select onchange="Views._wk=+this.value;UI.render()">${Array.from({length:17},(_,i)=>i+1).map(w =>
+            `<option value="${w}" ${w === wk ? "selected" : ""}>Week ${w}${w >= 16 ? " (Playoffs)" : ""}</option>`).join("")}</select>
+          ${locked ? `<span class="pill bye">Locked</span>` : `<span class="sub">Locks ${lockTime(s, wk).toLocaleString("en-US",{weekday:"short",month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit",timeZone:"America/New_York"})} ET</span>`}
+          ${lu.auto ? `<span class="pill bye">Auto-set</span>` : ""}
+        </div>
+        ${slotRow("RB","rb",p => p.pos === "RB")}
+        ${slotRow("WR","wr",p => p.pos === "WR")}
+        ${slotRow("DEF","def",p => DEF_POS.includes(p.pos))}
+        ${slotRow("UTIL","util",() => true)}
+        <h3>Bench</h3>
+        ${benchIds.length ? benchIds.map(p => `<div class="slot"><div class="tag" style="color:var(--muted)">BE</div><div style="flex:1">${esc(p.name)} <span class="pill pos">${esc(p.pos)}</span></div><div class="pt">${fmt1(playerWeekPoints(s, p.id, wk))}</div></div>`).join("") : `<p class="sub">Empty bench</p>`}
+        ${!locked ? `<div class="btnrow"><button class="btn gold" onclick="Views.saveLineup(${wk})">Save lineup</button></div>` : ""}
+      </div>
+      <div class="card">
+        <h2>Roster</h2>
+        <div class="tablewrap"><table>
+          <tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025</th><th>Via</th><th></th></tr>
+          ${mine.map(p => `<tr><td>${esc(p.name)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td><td class="sub">${(s.roster.find(r => r.player_id === p.id) || {}).acquired === "fa" ? "FA" : "Draft"}</td><td>${s.draft.status === "done" ? `<button class="btn sm" onclick="Views.dropPlayer(${p.id})">Drop</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No players yet. See you at the draft.</td></tr>`}
+        </table></div>
+      </div>`;
+  },
+  _luChange() { /* selections read on save */ },
+  saveLineup(week) {
+    const me = App.myTeam();
+    const val = k => { const v = $("lu-" + k).value; return v ? +v : null; };
+    const slots = { rb: val("rb"), wr: val("wr"), def: val("def"), util: val("util") };
+    const ids = Object.values(slots).filter(Boolean);
+    if (new Set(ids).size !== ids.length) { toast("Same player in two slots"); return; }
+    App.mutate(() => App.store.setLineup(me.id, week, slots), `Week ${week} lineup saved`);
+  },
+
+  /* ---------- ROSTERS ---------- */
+  rosters() {
+    const s = App.state;
+    const rows = standings(s);
+    return `<div class="grid2">` + s.teams.map(t => {
+      const r = rows.find(x => x.team.id === t.id);
+      const mine = rosterOf(s, t.id);
+      return `<div class="card">
+        <h2>${tmName(t)}</h2>
+        <p class="sub">${esc(t.owner)} &middot; ${r.w}-${r.l}${r.t ? "-" + r.t : ""} &middot; PF ${fmt1(r.pf)}</p>
+        <div class="tablewrap" style="margin-top:8px"><table>
+          ${mine.map(p => `<tr><td>${esc(p.name)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
+        </table></div>
+      </div>`;
+    }).join("") + `</div>`;
+  },
+
+  /* ---------- PLAYERS ---------- */
+  players() {
+    const s = App.state;
+    const recent = s.txns.slice(0, 8).map(tx => {
+      const t = s.teams.find(x => x.id === tx.team_id);
+      const a = tx.add_player_id ? s.players.find(p => p.id === tx.add_player_id) : null;
+      const d = tx.drop_player_id ? s.players.find(p => p.id === tx.drop_player_id) : null;
+      return `<div class="statline">${esc(t.owner)}: ${a ? "added " + esc(a.name) : ""}${a && d ? ", " : ""}${d ? "dropped " + esc(d.name) : ""}</div>`;
+    }).join("");
+    return this._bigBoardCard(s.draft.status === "live") +
+      (recent ? `<div class="card"><h2>Recent Moves</h2>${recent}</div>` : "");
+  },
+
+  /* ---------- MATCHUPS ---------- */
+  _mwk: null,
+  matchups() {
+    const s = App.state;
+    const wk = this._mwk || Math.min(currentWeek(s), 17);
+    const isFinal = finalWeeks(s).includes(wk);
+    const games = weekGames(s, wk);
+    const bye = weekBye(s, wk);
+    const tm = byId(s.teams);
+    const cards = games.map(g => {
+      if (!g.team_a || !g.team_b) return `<div class="mu"><div class="side"><div class="tn sub">${esc(g.label || "TBD")}</div></div></div>`;
+      const A = tm[g.team_a], B = tm[g.team_b];
+      const sa = teamWeekScore(s, g.team_a, wk), sb = teamWeekScore(s, g.team_b, wk);
+      const aw = isFinal && sa > sb, bw = isFinal && sb > sa;
+      return `<div class="mu">
+        <div class="side"><div class="tn ${aw ? "win" : ""}">${esc(A.name)}<span class="tm">™</span></div><div class="sub">${esc(A.owner)}</div><div class="sc ${aw ? "win" : ""}">${fmt1(sa)}</div></div>
+        <div class="vs">${isFinal ? "FINAL" : "VS"}</div>
+        <div class="side right"><div class="tn ${bw ? "win" : ""}">${esc(B.name)}<span class="tm">™</span></div><div class="sub">${esc(B.owner)}</div><div class="sc ${bw ? "win" : ""}">${fmt1(sb)}</div></div>
+      </div>`;
+    }).join("");
+    return `
+      <div class="card">
+        <h2>Matchups</h2>
+        <div class="frow">
+          <select onchange="Views._mwk=+this.value;UI.render()">${Array.from({length:17},(_,i)=>i+1).map(w =>
+            `<option value="${w}" ${w === wk ? "selected" : ""}>Week ${w}${w === 16 ? " (Semifinals)" : w === 17 ? " (Championship)" : ""}</option>`).join("")}</select>
+          ${isFinal ? `<span class="pill bye">Final</span>` : `<span class="pill live" style="animation:none;background:var(--raised);border:1px solid var(--line);color:var(--muted)">Live totals</span>`}
+        </div>
+        ${cards || `<p class="empty">No games this week</p>`}
+        ${bye ? `<div class="mu"><div class="side"><div class="tn">${esc(tm[bye].name)}<span class="tm">™</span></div><div class="sub">${esc(tm[bye].owner)}</div></div><span class="pill bye">BYE WEEK</span></div>` : ""}
+      </div>`;
+  },
+
+  /* ---------- STANDINGS ---------- */
+  standings() {
+    const s = App.state;
+    const rows = standings(s);
+    const me = App.myTeam();
+    return `
+      <div class="card">
+        <h2>Standings</h2>
+        <p class="sub">Top 4 make the playoffs. Weeks 1-15, then semis week 16, championship week 17.</p>
+        <div class="tablewrap" style="margin-top:10px"><table>
+          <tr><th class="num">#</th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">T</th><th class="num">PF</th><th class="num">PA</th></tr>
+          ${rows.map((r, i) => `<tr class="${me && r.team.id === me.id ? "mine" : ""}">
+            <td class="num">${i + 1}</td><td>${tmName(r.team)} <span class="sub">${esc(r.team.owner)}</span></td>
+            <td class="num">${r.w}</td><td class="num">${r.l}</td><td class="num">${r.t}</td>
+            <td class="num">${fmt1(r.pf)}</td><td class="num">${fmt1(r.pa)}</td></tr>`).join("")}
+        </table></div>
+        ${finalWeeks(s).length === 0 ? `<p class="sub" style="margin-top:8px">Standings count weeks the commissioner has marked final.</p>` : ""}
+      </div>`;
+  },
+
+  /* ---------- LEAGUE ---------- */
+  league() {
+    const s = App.state;
+    const sc = s.settings.scoring;
+    const tm = byId(s.teams);
+    const pm = byId(s.players);
+    const schedRows = [];
+    for (let w = 1; w <= 15; w++) {
+      const g = weekGames(s, w).map(x => `${tm[x.team_a].owner} vs ${tm[x.team_b].owner}`).join(" &middot; ");
+      const b = weekBye(s, w);
+      schedRows.push(`<tr><td class="num">${w}</td><td>${g}</td><td class="sub">${b ? tm[b].owner : ""}</td></tr>`);
+    }
+    const draftRows = s.picks.map(p => `<tr><td class="num">${p.pick_no}</td><td class="sub">RD ${p.round}</td><td>${esc(tm[p.team_id].owner)}</td><td>${esc(pm[p.player_id].name)}</td><td><span class="pill pos">${esc(pm[p.player_id].pos)}</span></td></tr>`).join("");
+    return `
+      <div class="grid2">
+        <div class="card">
+          <h2>League Rules</h2>
+          <p><b>${esc(s.settings.league.name)}</b> &middot; ${esc(s.settings.league.type)} &middot; ${s.settings.league.teams} teams</p>
+          <p class="sub" style="margin-top:6px">Buy-in $${s.settings.league.buy_in} &middot; Pot $${s.settings.league.pot} &middot; Payouts: ${esc(s.settings.payouts.note)}</p>
+          <h3>Rosters</h3>
+          <p class="sub">1 RB &middot; 1 WR &middot; 1 DEF (any of LB/S/CB/DE/DT) &middot; 1 UTIL (any) &middot; 3 Bench</p>
+          <h3>Season</h3>
+          <p class="sub">15-week regular season, rotating bye (one team off each week). Everyone plays everyone 3 times. Weeks 16-17: playoffs, top 4 seeds. Lineups lock ${esc(s.settings.season_dates.lineup_lock)}.</p>
+          <h3>Draft</h3>
+          <p class="sub">Snake &middot; ${ROUNDS} rounds &middot; ${PICK_SECONDS} seconds per pick &middot; Order: ${s.teams.map(t => esc(t.owner)).join(" &rarr; ")}</p>
+        </div>
+        <div class="card">
+          <h2>Scoring</h2>
+          <div class="tablewrap"><table>
+            ${[["Touchdown", sc.td],["Yard gained", sc.yds],["Reception", sc.rec],["Fumble lost", sc.fum],["Solo tackle", sc.solo],["Assist", sc.ast],["Sack", sc.sack],["Interception", sc.intc],["Pass breakup", sc.pbu],["Forced fumble / recovery", sc.ffr]].map(([l, v]) =>
+              `<tr><td>${l}</td><td class="num">${v > 0 ? "+" : ""}${v}</td></tr>`).join("")}
+          </table></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Schedule</h2>
+        <div class="tablewrap"><table>
+          <tr><th class="num">WK</th><th>Games</th><th>Bye</th></tr>${schedRows.join("")}
+          <tr><td class="num">16</td><td>Semifinals: 1v4, 2v3</td><td class="sub">5 seed out</td></tr>
+          <tr><td class="num">17</td><td>Championship + 3rd place game</td><td class="sub"></td></tr>
+        </table></div>
+      </div>
+      ${draftRows ? `<div class="card"><h2>Draft Results</h2><div class="tablewrap"><table><tr><th class="num">PK</th><th>RD</th><th>Team</th><th>Player</th><th>Pos</th></tr>${draftRows}</table></div></div>` : ""}`;
+  },
+
+  /* ---------- ADMIN ---------- */
+  _awk: null,
+  admin() {
+    const s = App.state;
+    if (!App.isCommish()) {
+      return `<div class="card"><h2>Commissioner</h2>
+        <div class="frow"><input id="cpin" type="password" inputmode="numeric" placeholder="Commish PIN" style="max-width:180px">
+        <button class="btn gold" onclick="Views._unlock()">Unlock</button></div></div>`;
+    }
+    const wk = this._awk || Math.min(currentWeek(s), 17);
+    const rosterIds = new Set(s.roster.map(r => r.player_id));
+    const pm = byId(s.players);
+    const tm = byId(s.teams);
+    const statRows = [...rosterIds].map(pid => pm[pid]).filter(Boolean)
+      .sort((a, b) => (s.roster.find(r => r.player_id === a.id).team_id - s.roster.find(r => r.player_id === b.id).team_id) || a.rank - b.rank)
+      .map(p => {
+        const st = s.stats.find(x => x.player_id === p.id && x.week === wk) || {};
+        const owner = tm[s.roster.find(r => r.player_id === p.id).team_id];
+        const cell = k => `<td><input data-pid="${p.id}" data-k="${k}" value="${st[k] || ""}" placeholder="0"></td>`;
+        return `<tr><td>${esc(p.name)} <span class="sub">${esc(p.pos)} &middot; ${esc(owner.owner)}</span></td>
+          ${["td","yds","rec","fum","solo","ast","sack","intc","pbu","ffr"].map(cell).join("")}
+          <td class="num">${fmt1(statPoints(st, s.settings.scoring))}</td></tr>`;
+      }).join("");
+    const fw = finalWeeks(s);
+    const g16 = weekGames(s, 16), g17 = weekGames(s, 17);
+    const teamOpt = (sel) => `<option value="">TBD</option>` + s.teams.map(t => `<option value="${t.id}" ${sel === t.id ? "selected" : ""}>${esc(t.owner)}</option>`).join("");
+    return `
+      <div class="card">
+        <h2>Draft Controls</h2>
+        <p class="sub">Status: <b style="color:var(--gold)">${s.draft.status.toUpperCase()}</b> &middot; Pick ${Math.min(s.picks.length + 1, TOTAL_PICKS)} of ${TOTAL_PICKS}</p>
+        <div class="btnrow">
+          ${s.draft.status === "pre" ? `<button class="btn gold" onclick="Draft.start()">Start draft</button>` : ""}
+          ${s.draft.status === "live" ? `<button class="btn" onclick="Draft.pause()">Pause</button>` : ""}
+          ${s.draft.status === "paused" ? `<button class="btn gold" onclick="Draft.resume()">Resume</button>` : ""}
+          ${["live","paused","done"].includes(s.draft.status) && s.picks.length ? `<button class="btn" onclick="if(confirm('Undo the last pick?'))Draft.undo()">Undo last pick</button>` : ""}
+          <button class="btn red" onclick="if(confirm('Full reset: wipes picks, rosters, moves, lineups, and stats. This is for after mock drafts. Continue?'))App.mutate(()=>App.store.resetDraft(),'League reset to pre-draft')">Reset league</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Enter Stats</h2>
+        <div class="frow">
+          <select onchange="Views._awk=+this.value;UI.render()">${Array.from({length:17},(_,i)=>i+1).map(w => `<option value="${w}" ${w === wk ? "selected" : ""}>Week ${w}</option>`).join("")}</select>
+          <button class="btn gold" onclick="Views.saveStats(${wk})">Save week ${wk} stats</button>
+          ${fw.includes(wk)
+            ? `<button class="btn" onclick="Views.toggleFinal(${wk},false)">Unmark final</button>`
+            : `<button class="btn" onclick="Views.toggleFinal(${wk},true)">Mark week final</button>`}
+          <button class="btn sm" onclick="App.mutate(()=>App.store.lockLineups(${wk},true),'Week ${wk} lineups locked')">Lock lineups</button>
+          <button class="btn sm" onclick="App.mutate(()=>App.store.lockLineups(${wk},false),'Week ${wk} lineups unlocked')">Unlock</button>
+        </div>
+        <div class="tablewrap statgrid"><table>
+          <tr><th>Player</th><th>TD</th><th>Yds</th><th>Rec</th><th>Fum</th><th>Solo</th><th>Ast</th><th>Sack</th><th>INT</th><th>PBU</th><th>FF/FR</th><th class="num">Pts</th></tr>
+          ${statRows || `<tr><td colspan="12" class="empty">No rostered players yet</td></tr>`}
+        </table></div>
+        <p class="sub" style="margin-top:8px">Marking a week final counts it in standings and shows FINAL on matchups.</p>
+      </div>
+      <div class="card">
+        <h2>Playoffs (Weeks 16-17)</h2>
+        <div class="btnrow" style="margin-bottom:10px"><button class="btn" onclick="Views.seedPlayoffs()">Auto-seed week 16 from standings</button></div>
+        ${[...g16, ...g17].map(g => `
+          <div class="frow"><span style="min-width:170px" class="sub">${esc(g.label || `Week ${g.week} Game ${g.game}`)}</span>
+            <select id="po-${g.week}-${g.game}-a">${teamOpt(g.team_a)}</select> vs
+            <select id="po-${g.week}-${g.game}-b">${teamOpt(g.team_b)}</select>
+            <button class="btn sm" onclick="Views.savePlayoffGame(${g.week},${g.game})">Save</button>
+          </div>`).join("")}
+      </div>
+      <div class="card">
+        <h2>Teams</h2>
+        ${s.teams.map(t => `
+          <div class="frow">
+            <span style="min-width:64px"><b>${esc(t.owner)}</b></span>
+            <input id="tn-${t.id}" value="${esc(t.name)}" style="flex:1;min-width:130px">
+            <input id="tp-${t.id}" value="${esc(t.pin)}" style="width:80px" title="PIN">
+            <button class="btn sm" onclick="Views.saveTeam(${t.id})">Save</button>
+          </div>`).join("")}
+      </div>
+      <div class="card">
+        <h2>Payouts</h2>
+        <div class="frow"><input id="payout-in" value="${esc(s.settings.payouts.note)}" style="flex:1">
+        <button class="btn sm" onclick="App.mutate(()=>App.store.saveSetting('payouts',{note:$('payout-in').value}),'Payouts updated')">Save</button></div>
+      </div>`;
+  },
+  saveTeam(teamId) {
+    const name = $("tn-" + teamId).value.trim();
+    const pin = $("tp-" + teamId).value.trim();
+    if (!name || !pin) { toast("Name and PIN can't be empty"); return; }
+    App.mutate(() => App.store.updateTeam(teamId, { name, pin }), "Team saved");
+  },
+  _unlock() {
+    if ($("cpin").value.trim() === App.state.settings.commish.pin) {
+      sessionStorage.setItem("tmfl_commish", "1"); UI.render(); toast("Commissioner mode on");
+    } else toast("Wrong PIN");
+  },
+  saveStats(week) {
+    const rows = {};
+    document.querySelectorAll(".statgrid input[data-pid]").forEach(inp => {
+      const pid = +inp.dataset.pid, k = inp.dataset.k;
+      rows[pid] = rows[pid] || { player_id: pid, week };
+      rows[pid][k] = inp.value === "" ? 0 : +inp.value || 0;
+    });
+    App.mutate(() => App.store.saveStats(Object.values(rows)), `Week ${week} stats saved`);
+  },
+  toggleFinal(week, on) {
+    const fw = new Set(finalWeeks(App.state));
+    if (on) fw.add(week); else fw.delete(week);
+    App.mutate(() => App.store.saveSetting("final_weeks", [...fw].sort((a, b) => a - b)), on ? `Week ${week} is final` : `Week ${week} reopened`);
+  },
+  seedPlayoffs() {
+    const rows = standings(App.state);
+    if (rows.length < 4) return;
+    App.mutate(async () => {
+      await App.store.updateScheduleGame(16, 1, { team_a: rows[0].team.id, team_b: rows[3].team.id });
+      await App.store.updateScheduleGame(16, 2, { team_a: rows[1].team.id, team_b: rows[2].team.id });
+    }, "Week 16 seeded: 1v4 and 2v3");
+  },
+  savePlayoffGame(week, game) {
+    const a = $(`po-${week}-${game}-a`).value, b = $(`po-${week}-${game}-b`).value;
+    App.mutate(() => App.store.updateScheduleGame(week, game, { team_a: a ? +a : null, team_b: b ? +b : null }), "Playoff game saved");
+  }
+};
+
+window.addEventListener("DOMContentLoaded", () => App.boot());
+
+</script>
+</body>
+</html>
