@@ -54,6 +54,8 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
 tr:last-child td{border-bottom:none}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 tr.mine td{background:rgba(245,196,67,.06)}
+tr.pickable{cursor:pointer}
+tr.pickable:hover td{background:rgba(245,196,67,.10)}
 
 /* buttons */
 .btn{background:var(--raised);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 14px;font-weight:600;font-size:14px}
@@ -592,13 +594,18 @@ const Draft = {
     const best = availablePlayers(s2)[0];
     if (team && best) await this.executePick(best.id, true, true);
   },
+  confirmPick(playerId) {
+    const p = App.state.players.find(x => x.id === playerId);
+    if (!p) return;
+    if (confirm(`Are you sure you want to draft ${p.name}?`)) this.executePick(p.id);
+  },
   async executePick(playerId, auto = false, silent = false) {
     const s = App.state;
     const pickNo = s.picks.length + 1;
     if (s.draft.status !== "live" || pickNo > TOTAL_PICKS) return;
     const { round, slot } = pickInfo(pickNo);
     const team = teamBySlot(s, slot);
-    if (!auto && App.me() !== team.id && !App.isCommish()) { toast("Not your pick"); return; }
+    if (!auto && App.me() !== team.id) { toast("Not your pick"); return; }
     if (s.roster.some(r => r.player_id === playerId)) { toast("Already taken"); return; }
     const player = s.players.find(p => p.id === playerId);
     const done = pickNo === TOTAL_PICKS;
@@ -765,23 +772,24 @@ const Views = {
     const s = App.state;
     const q = (this._q || "").toLowerCase();
     const posF = this._pos || "ALL";
-    const faOnly = !!this._fa;
+    const faOnly = this._fa !== false;
     const taken = new Set(s.roster.map(r => r.player_id));
     let rows = s.players.filter(p =>
       (!q || p.name.toLowerCase().includes(q) || p.nfl_team.toLowerCase().includes(q)) &&
       (posF === "ALL" || (posF === "DEF" ? DEF_POS.includes(p.pos) : p.pos === posF)) &&
       (!faOnly || !taken.has(p.id)));
     const team = onClockTeam(s);
-    const canDraft = liveDraft && s.draft.status === "live" && team && (App.me() === team.id || App.isCommish());
+    const canDraft = liveDraft && s.draft.status === "live" && team && App.me() === team.id;
     const postDraft = s.draft.status === "done";
     const me = App.myTeam();
     const html = rows.map(p => {
       const owner = playerOwner(s, p.id);
+      const clickable = liveDraft && !owner && canDraft;
       let action = "";
-      if (liveDraft && !owner) action = `<button class="btn gold sm" ${canDraft ? "" : "disabled"} onclick="Draft.executePick(${p.id})">Draft</button>`;
+      if (liveDraft && !owner) action = `<button class="btn gold sm" ${canDraft ? "" : "disabled"}>Draft</button>`;
       else if (postDraft && !owner && me) action = `<button class="btn sm" onclick="Views.addPlayer(${p.id})">Add</button>`;
       const status = owner ? `<span class="pill own">${esc(owner.owner)}</span>` : `<span class="pill fa">FA</span>`;
-      return `<tr class="${owner && me && owner.id === me.id ? "mine" : ""}">
+      return `<tr class="${owner && me && owner.id === me.id ? "mine" : ""}${clickable ? " pickable" : ""}" ${clickable ? `onclick="Draft.confirmPick(${p.id})"` : ""}>
         <td class="num">${p.rank}</td>
         <td>${esc(p.name)} ${p.rookie ? '<span class="pill rk">R</span>' : ""}</td>
         <td><span class="pill pos">${esc(p.pos)}</span></td>
@@ -797,7 +805,7 @@ const Views = {
           <select onchange="Views._pos=this.value;UI.render()">
             ${["ALL","RB","WR","DEF"].map(p => `<option ${posF === p ? "selected" : ""}>${p}</option>`).join("")}
           </select>
-          <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" ${faOnly ? "checked" : ""} onchange="Views._fa=this.checked;UI.render()"> FA only</label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" ${faOnly ? "checked" : ""} onchange="Views._fa=this.checked;UI.render()"> Available Players</label>
         </div>
         <div class="tablewrap"><table>
           <tr><th class="num">RK</th><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025 Pts</th><th>Status</th><th></th></tr>
