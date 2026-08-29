@@ -76,6 +76,7 @@ tr.pickable:hover td{background:rgba(245,196,67,.10)}
 .pill.rk{background:rgba(152,160,175,.15);color:var(--muted)}
 .pill.live{background:var(--live);color:#fff;animation:pulse 1.2s infinite}
 .pill.bye{background:var(--raised);border:1px solid var(--line);color:var(--muted)}
+.pill.inj{background:rgba(229,72,77,.16);border:1px solid rgba(229,72,77,.55);color:#ff8a8e}
 @keyframes pulse{50%{opacity:.55}}
 
 /* draft: on-the-clock lower third */
@@ -132,7 +133,7 @@ tr.pickable:hover td{background:rgba(245,196,67,.10)}
 
 /* modal + toast */
 .modalbg{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:100;padding:18px}
-.modal{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:400px}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:400px;max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .modal h2{font-family:var(--disp);font-weight:800;font-size:22px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
 .teampick{display:grid;gap:8px;margin-bottom:12px}
 .teampick button{background:var(--raised);border:1px solid var(--line);border-radius:9px;padding:11px;font-family:var(--disp);font-weight:700;font-size:18px;text-transform:uppercase;letter-spacing:.5px;color:var(--text);text-align:left}
@@ -339,6 +340,10 @@ const ROSTER_CAP = 7;
 function projFor(p) { return !p || p.pts_2025 == null ? null : p.pts_2025 / 17; }
 function liveMeta(state) { return state.settings.live_meta || { players: {} }; }
 function playerMeta(state, playerId) { return (liveMeta(state).players || {})[playerId] || null; }
+function injuryMeta(state) { return state.settings.injury_meta || { players: {} }; }
+function playerInjury(state, playerId) { return (injuryMeta(state).players || {})[playerId] || null; }
+function injBadge(state, playerId) { const i = playerInjury(state, playerId); return i ? ` <span class="pill inj" title="${esc(i.full || i.st)}">${esc(i.st)}</span>` : ""; }
+function injText(state, playerId) { const i = playerInjury(state, playerId); return i ? ` \u00b7 ${i.st}` : ""; }
 function teamWeekProj(state, teamId, week) {
   const lu = lineupFor(state, teamId, week);
   let sum = 0;
@@ -589,6 +594,8 @@ const App = {
     setInterval(() => Draft.tick(), 400);
     setInterval(() => LiveSync.tick(), 30000);
     setTimeout(() => LiveSync.tick(), 4000);
+    setInterval(() => InjurySync.tick(), 60000);
+    setTimeout(() => InjurySync.tick(), 2500);
   },
   go() {
     let t = (location.hash || "#team").slice(1);
@@ -860,7 +867,7 @@ const Views = {
       const status = owner ? `<span class="pill own">${esc(owner.owner)}</span>` : `<span class="pill fa">FA</span>`;
       return `<tr class="${owner && me && owner.id === me.id ? "mine" : ""}${clickable ? " pickable" : ""}" ${clickable ? `onclick="Draft.confirmPick(${p.id})"` : ""}>
         <td class="num">${p.rank}</td>
-        <td>${esc(p.name)} ${p.rookie ? '<span class="pill rk">R</span>' : ""}</td>
+        <td>${esc(p.name)}${injBadge(s, p.id)} ${p.rookie ? '<span class="pill rk">R</span>' : ""}</td>
         <td><span class="pill pos">${esc(p.pos)}</span></td>
         <td class="sub">${esc(p.nfl_team)}</td>
         <td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td>
@@ -929,7 +936,7 @@ const Views = {
           <h2>Roster full</h2>
           <p class="sub" style="margin-bottom:10px">Drop someone to add ${esc(pl.name)}:</p>
           <div class="teampick">${mine.map(p =>
-            `<button onclick="Views.confirmSwap(${me.id},${playerId},${p.id})">${esc(p.name)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}
+            `<button onclick="Views.confirmSwap(${me.id},${playerId},${p.id})">${esc(p.name)}${injBadge(s, p.id)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}
           </div>
           <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
         </div>
@@ -955,7 +962,7 @@ const Views = {
       const chosen = [lu.rb, lu.wr, lu.def, lu.util].filter(Boolean);
       return `<option value="">Empty</option>` + mine.filter(p => elig(p)).map(p => {
         const usedElsewhere = chosen.includes(p.id) && lu[slotKey] !== p.id;
-        return `<option value="${p.id}" ${lu[slotKey] === p.id ? "selected" : ""} ${usedElsewhere ? "disabled" : ""}>${esc(p.name)} (${esc(p.pos)})</option>`;
+        return `<option value="${p.id}" ${lu[slotKey] === p.id ? "selected" : ""} ${usedElsewhere ? "disabled" : ""}>${esc(p.name)} (${esc(p.pos)})${injText(s, p.id)}</option>`;
       }).join("");
     };
     const slotRow = (tag, key, elig) => `
@@ -964,16 +971,17 @@ const Views = {
         <div class="pt">${fmt1(lu[key] ? playerWeekPoints(s, lu[key], wk) : 0)}</div>
       </div>`;
     const benchIds = mine.filter(p => ![lu.rb, lu.wr, lu.def, lu.util].includes(p.id));
+    const pend = tradesOf(s).filter(t => t.status === "pending" && (t.to === me.id || t.from === me.id));
+    const pendIn = pend.filter(t => t.to === me.id).length;
     return `
       <div class="card">
         <h2>${tmName(me)}</h2>
         <p class="sub">${esc(me.owner)} &middot; Record ${row.w}-${row.l}${row.t ? "-" + row.t : ""} &middot; PF ${fmt1(row.pf)}</p>
-        <div class="frow" style="margin-top:10px">
-          <input id="rn-me" value="${esc(me.name)}" maxlength="40" style="flex:1;min-width:170px">
-          <button class="btn sm" onclick="Views.renameMyTeam()">Rename team</button>
+        <div class="btnrow" style="margin-top:10px">
+          <button class="btn sm" onclick="Views.renameModal()">Rename team</button>
+          <button class="btn sm${pendIn ? " gold" : ""}" onclick="Views.tradesModal()">Trades${pend.length ? ` (${pend.length})` : ""}</button>
         </div>
       </div>
-      ${this._tradeOffersCard()}
       <div class="card">
         <h2>Lineup</h2>
         <div class="frow">
@@ -987,23 +995,38 @@ const Views = {
         ${slotRow("DEF","def",p => DEF_POS.includes(p.pos))}
         ${slotRow("UTIL","util",() => true)}
         <h3>Bench</h3>
-        ${benchIds.length ? benchIds.map(p => `<div class="slot"><div class="tag" style="color:var(--muted)">BE</div><div style="flex:1">${esc(p.name)} <span class="pill pos">${esc(p.pos)}</span></div><div class="pt">${fmt1(playerWeekPoints(s, p.id, wk))}</div></div>`).join("") : `<p class="sub">Empty bench</p>`}
+        ${benchIds.length ? benchIds.map(p => `<div class="slot"><div class="tag" style="color:var(--muted)">BE</div><div style="flex:1">${esc(p.name)}${injBadge(s, p.id)} <span class="pill pos">${esc(p.pos)}</span></div><div class="pt">${fmt1(playerWeekPoints(s, p.id, wk))}</div></div>`).join("") : `<p class="sub">Empty bench</p>`}
         ${!locked ? `<div class="btnrow"><button class="btn gold" onclick="Views.saveLineup(${wk})">Save lineup</button></div>` : ""}
       </div>
       <div class="card">
         <h2>Roster</h2>
         <div class="tablewrap"><table>
           <tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025</th><th>Via</th><th></th></tr>
-          ${mine.map(p => `<tr><td>${esc(p.name)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td><td class="sub">${(s.roster.find(r => r.player_id === p.id) || {}).acquired === "fa" ? "FA" : "Draft"}</td><td>${s.draft.status === "done" ? `<button class="btn sm" onclick="Views.dropPlayer(${p.id})">Drop</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No players yet. See you at the draft.</td></tr>`}
+          ${mine.map(p => `<tr><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td><td class="sub">${(s.roster.find(r => r.player_id === p.id) || {}).acquired === "fa" ? "FA" : "Draft"}</td><td>${s.draft.status === "done" ? `<button class="btn sm" onclick="Views.dropPlayer(${p.id})">Drop</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No players yet. See you at the draft.</td></tr>`}
         </table></div>
       </div>`;
   },
   _luChange() { /* selections read on save */ },
+  renameModal() {
+    const me = App.myTeam(); if (!me) { UI.identity(); return; }
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal">
+          <h2>Rename team</h2>
+          <div class="frow"><input id="rn-me" value="${esc(me.name)}" maxlength="40" style="flex:1"></div>
+          <div class="btnrow">
+            <button class="btn gold" onclick="Views.renameMyTeam()">Save name</button>
+            <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+  },
   renameMyTeam() {
     const me = App.myTeam(); if (!me) return;
     const name = $("rn-me").value.trim();
     if (!name) { toast("Name can't be empty"); return; }
     if (name === me.name) { toast("That's already your name"); return; }
+    UI.closeModal();
     App.mutate(() => App.store.updateTeam(me.id, { name }), `You are now ${name}`);
   },
   saveLineup(week) {
@@ -1021,7 +1044,8 @@ const Views = {
     const rows = standings(s);
     const me = App.myTeam();
     const canTrade = me && s.draft.status === "done";
-    return `<div class="grid2">` + s.teams.map(t => {
+    const shown = me ? s.teams.filter(t => t.id !== me.id) : s.teams;
+    return `<div class="grid2">` + shown.map(t => {
       const r = rows.find(x => x.team.id === t.id);
       const mine = rosterOf(s, t.id);
       const tradeable = canTrade && t.id !== me.id;
@@ -1029,7 +1053,7 @@ const Views = {
         <h2>${tmName(t)}</h2>
         <p class="sub">${esc(t.owner)} &middot; ${r.w}-${r.l}${r.t ? "-" + r.t : ""} &middot; PF ${fmt1(r.pf)}${tradeable ? ` &middot; <span style="color:var(--gold)">tap a player to offer a trade</span>` : ""}</p>
         <div class="tablewrap" style="margin-top:8px"><table>
-          ${mine.map(p => `<tr${tradeable ? ` class="rowlink" onclick="Views.tradeStart(${p.id})"` : ""}><td>${esc(p.name)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
+          ${mine.map(p => `<tr${tradeable ? ` class="rowlink" onclick="Views.tradeStart(${p.id})"` : ""}><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
         </table></div>
       </div>`;
     }).join("") + `</div>`;
@@ -1044,7 +1068,7 @@ const Views = {
     const owner = playerOwner(s, playerId);
     if (!owner || owner.id === me.id) return;
     this._tr = { to: owner.id, get: [playerId], give: [], from_drops: [] };
-    this.tradeModal();
+    this.tradeStep1();
   },
   _tradeToggle(side, pid, el) {
     const arr = this._tr[side];
@@ -1052,49 +1076,68 @@ const Views = {
     if (i >= 0) arr.splice(i, 1); else arr.push(pid);
     el.classList.toggle("on", i < 0);
   },
-  tradeModal() {
-    const s = App.state, me = App.myTeam(), tr = this._tr;
+  _trBtn(side, p) {
+    return `<button class="${this._tr[side].includes(p.id) ? "on" : ""}" onclick="Views._tradeToggle('${side}',${p.id},this)">${esc(p.name)}${injBadge(App.state, p.id)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`;
+  },
+  tradeStep1() {
+    const s = App.state, tr = this._tr;
     const them = s.teams.find(t => t.id === tr.to);
-    const theirRoster = rosterOf(s, tr.to), myRoster = rosterOf(s, me.id);
-    const pbtn = (side, p) => `<button class="${tr[side].includes(p.id) ? "on" : ""}" onclick="Views._tradeToggle('${side}',${p.id},this)">${esc(p.name)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`;
     $("modalroot").innerHTML = `
       <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
         <div class="modal" style="max-width:520px">
           <h2>Trade with ${esc(them.owner)}</h2>
-          <p class="sub" style="margin:4px 0 6px">You get (from ${esc(them.name)}):</p>
-          <div class="teampick">${theirRoster.map(p => pbtn("get", p)).join("")}</div>
-          <p class="sub" style="margin:10px 0 6px">You send:</p>
-          <div class="teampick">${myRoster.map(p => pbtn("give", p)).join("")}</div>
+          <p class="sub" style="margin:4px 0 8px">Step 1 of 2 &middot; Tap the players you want from ${esc(them.name)}:</p>
+          <div class="teampick">${rosterOf(s, tr.to).map(p => this._trBtn("get", p)).join("")}</div>
           <div class="btnrow" style="margin-top:12px">
-            <button class="btn gold" onclick="Views.tradeReview()">Review trade</button>
+            <button class="btn gold" onclick="Views.tradeStep2()">Next</button>
             <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
           </div>
         </div>
       </div>`;
   },
-  tradeReview() {
+  tradeStep2() {
     const s = App.state, me = App.myTeam(), tr = this._tr;
-    if (!tr.get.length || !tr.give.length) { toast("Pick at least one player on each side"); return; }
-    const myCount = rosterOf(s, me.id).length - tr.give.length + tr.get.length;
-    const over = myCount - ROSTER_CAP;
-    tr.from_drops = [];
-    if (over > 0) {
-      const keepers = rosterOf(s, me.id).filter(p => !tr.give.includes(p.id));
-      $("modalroot").innerHTML = `
-        <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
-          <div class="modal" style="max-width:520px">
-            <h2>Over the roster cap</h2>
-            <p class="sub" style="margin:4px 0 8px">If accepted you'd have ${myCount} players. The cap is ${ROSTER_CAP}. Pick ${over} of yours to drop to free agency:</p>
-            <div class="teampick">${keepers.map(p => `<button onclick="Views._tradeToggle('from_drops',${p.id},this)">${esc(p.name)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}</div>
-            <div class="btnrow" style="margin-top:12px">
-              <button class="btn gold" onclick="Views.tradeSend(${over})">Send trade</button>
-              <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
-            </div>
+    if (!tr.get.length) { toast("Pick at least one player to receive"); return; }
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal" style="max-width:520px">
+          <h2>Your side</h2>
+          <p class="sub" style="margin:4px 0 8px">Step 2 of 2 &middot; Tap the players you send from ${esc(me.name)}:</p>
+          <div class="teampick">${rosterOf(s, me.id).map(p => this._trBtn("give", p)).join("")}</div>
+          <div class="btnrow" style="margin-top:12px">
+            <button class="btn gold" onclick="Views.tradeConfirm()">Submit</button>
+            <button class="btn" onclick="Views.tradeStep1()">Back</button>
+            <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
           </div>
-        </div>`;
-      return;
-    }
-    this.tradeSend(0);
+        </div>
+      </div>`;
+  },
+  tradeConfirm() {
+    const s = App.state, me = App.myTeam(), tr = this._tr;
+    if (!tr.give.length) { toast("Pick at least one player to send"); return; }
+    const them = s.teams.find(t => t.id === tr.to);
+    const pm = byId(s.players);
+    const names = ids => ids.map(id => esc((pm[id] || {}).name || "?")).join(", ");
+    const myCount = rosterOf(s, me.id).length - tr.give.length + tr.get.length;
+    const over = Math.max(0, myCount - ROSTER_CAP);
+    tr.from_drops = [];
+    const keepers = over > 0 ? rosterOf(s, me.id).filter(p => !tr.give.includes(p.id)) : [];
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal" style="max-width:520px">
+          <h2>Are you sure you want to submit?</h2>
+          <p class="sub" style="margin:4px 0 4px">You get from ${esc(them.owner)}: <b>${names(tr.get)}</b></p>
+          <p class="sub" style="margin:0 0 8px">You send: <b>${names(tr.give)}</b></p>
+          ${over > 0 ? `
+          <p class="sub" style="margin:8px 0 8px">This puts you at ${myCount} players and the cap is ${ROSTER_CAP}. Pick ${over} of yours to drop to free agency:</p>
+          <div class="teampick">${keepers.map(p => this._trBtn("from_drops", p)).join("")}</div>` : ""}
+          <div class="btnrow" style="margin-top:12px">
+            <button class="btn gold" onclick="Views.tradeSend(${over})">Yes, send trade</button>
+            <button class="btn" onclick="Views.tradeStep2()">Back</button>
+            <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
   },
   tradeSend(needDrops) {
     const s = App.state, me = App.myTeam(), tr = this._tr;
@@ -1104,14 +1147,13 @@ const Views = {
     UI.closeModal();
     App.mutate(() => App.store.saveSetting("trades", [...tradesOf(s), trade]), `Trade sent to ${them.owner}`);
   },
-  _tradeOffersCard() {
+  tradesModal() {
     const s = App.state, me = App.myTeam();
-    if (!me) return "";
+    if (!me) { UI.identity(); return; }
     const pm = byId(s.players), tm = byId(s.teams);
     const pend = tradesOf(s).filter(t => t.status === "pending" && (t.to === me.id || t.from === me.id));
-    if (!pend.length) return "";
     const names = ids => (ids || []).map(id => esc((pm[id] || {}).name || "?")).join(", ");
-    return `<div class="card"><h2>Trade Offers</h2>` + pend.map(t => {
+    const rows = pend.map(t => {
       const incoming = t.to === me.id;
       const other = tm[incoming ? t.from : t.to];
       return `<div class="mu" style="flex-wrap:wrap">
@@ -1122,10 +1164,18 @@ const Views = {
           ${(t.from_drops || []).length ? `<div class="sub">${incoming ? esc(other.owner) + " also drops" : "You also drop"}: ${names(t.from_drops)}</div>` : ""}
         </div>
         <div class="btnrow">${incoming
-          ? `<button class="btn gold sm" onclick="Views.tradeAccept(${t.id})">Accept</button><button class="btn sm" onclick="Views.tradeResolve(${t.id},'rejected')">Reject</button>`
+          ? `<button class="btn gold sm" onclick="Views.tradeAccept(${t.id})">Accept</button><button class="btn sm" onclick="Views.tradeResolve(${t.id},'rejected')">Decline</button>`
           : `<button class="btn sm" onclick="Views.tradeResolve(${t.id},'cancelled')">Cancel offer</button>`}</div>
       </div>`;
-    }).join("") + `</div>`;
+    }).join("");
+    $("modalroot").innerHTML = `
+      <div class="modalbg" onclick="if(event.target===this)UI.closeModal()">
+        <div class="modal" style="max-width:520px">
+          <h2>Trades</h2>
+          ${rows || `<p class="sub" style="margin:4px 0 8px">No pending trades. Hit the Rosters tab and tap a player on another team to start one.</p>`}
+          <div class="btnrow" style="margin-top:12px"><button class="btn ghost" onclick="UI.closeModal()">Close</button></div>
+        </div>
+      </div>`;
   },
   _acceptDrops: [], _acceptId: null,
   _acceptToggle(pid, el) {
@@ -1152,7 +1202,7 @@ const Views = {
           <div class="modal" style="max-width:520px">
             <h2>Over the roster cap</h2>
             <p class="sub" style="margin:4px 0 8px">Accepting puts you at ${myCount} players. The cap is ${ROSTER_CAP}. Pick ${over} of yours to drop to free agency:</p>
-            <div class="teampick">${keepers.map(p => `<button onclick="Views._acceptToggle(${p.id},this)">${esc(p.name)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}</div>
+            <div class="teampick">${keepers.map(p => `<button onclick="Views._acceptToggle(${p.id},this)">${esc(p.name)}${injBadge(s, p.id)} <span class="sub" style="font-size:12px;font-family:var(--body);text-transform:none;letter-spacing:0">${esc(p.pos)}</span></button>`).join("")}</div>
             <div class="btnrow" style="margin-top:12px">
               <button class="btn gold" onclick="Views.tradeFinish(${over})">Accept trade</button>
               <button class="btn ghost" onclick="UI.closeModal()">Cancel</button>
@@ -1182,7 +1232,8 @@ const Views = {
   tradeResolve(id, status) {
     const s = App.state;
     const list = tradesOf(s).map(x => x.id === id ? { ...x, status, resolved_at: new Date().toISOString() } : x);
-    App.mutate(() => App.store.saveSetting("trades", list), status === "rejected" ? "Trade rejected" : "Trade cancelled");
+    UI.closeModal();
+    App.mutate(() => App.store.saveSetting("trades", list), status === "rejected" ? "Trade declined" : "Trade cancelled");
   },
   async _scrubLineups(teamIds, movedPids) {
     const s = App.state;
@@ -1327,7 +1378,7 @@ const Views = {
     const line = this._statLine(pid, wk);
     const status = m ? `${m.opp ? (m.home ? "vs " : "@ ") + esc(m.opp) + " &middot; " : ""}${esc(m.dt || "")}` : "";
     return `<div class="pcell${right ? " right" : ""}">
-      <div class="pname">${esc(p.name)}</div>
+      <div class="pname">${esc(p.name)}${injBadge(s, p.id)}</div>
       <div class="pmeta">${esc(p.pos)} &middot; ${esc(p.nfl_team)}</div>
       ${status || line ? `<div class="pmeta">${status}${status && line ? " &middot; " : ""}${line}</div>` : ""}
     </div>`;
@@ -1465,6 +1516,7 @@ const Views = {
         <div class="btnrow" style="margin-top:8px">
           <button class="btn gold" onclick="LiveSync.sync(${wk}, true)">Sync week ${wk} now</button>
           <button class="btn" onclick="Views._toggleFeed()">${this._feedOn() ? "Turn auto-sync off" : "Turn auto-sync on"}</button>
+          <button class="btn" onclick="InjurySync.sync(true)">Sync injuries now</button>
         </div>
         <p class="sub" style="margin-top:8px">${this._feedStatus()}</p>
       </div>
@@ -1535,6 +1587,8 @@ const Views = {
     bits.push(lm && lm.updated_at ? `Last league sync: ${when(lm.updated_at)} (week ${lm.week})` : "No sync has run yet");
     if (r && r.error) bits.push(`Last attempt on this device failed: ${esc(r.error)}`);
     else if (r) bits.push(`This device: ${r.games} games read, ${r.matched} players matched, ${r.updated} stat lines updated`);
+    const im = App.state.settings.injury_meta;
+    bits.push(im && im.updated_at ? `Injuries: ${Object.keys(im.players || {}).length} flagged, updated ${when(im.updated_at)}` : "Injuries: not synced yet");
     return bits.join(" &middot; ");
   },
   saveStats(week) {
@@ -1575,6 +1629,7 @@ const LiveSync = {
   enabled() { return !App.state || App.state.settings.live_sync_enabled !== false; },
   norm(n) {
     return String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/["\u201c\u201d][^"\u201c\u201d]*["\u201c\u201d]/g, " ")
       .replace(/[."'\u2019,-]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/\s+/g, " ").trim();
   },
   nameMap() {
@@ -1656,6 +1711,62 @@ const LiveSync = {
       this._lastResult = { week, games: gamesRead, matched: Object.keys(acc).length, updated: rows.length, at: new Date().toISOString() };
       if (manual) toast(`Feed: ${gamesRead} games read, ${rows.length} stat lines updated`);
       await App.queueRefresh();
+    } finally { this._running = false; }
+  }
+};
+
+/* ============================================================
+   Injury feed: public ESPN league injury report -> red status pills.
+   Refreshes every 30 min in whichever browser is open; shared via settings.
+   ============================================================ */
+const InjurySync = {
+  _last: 0, _running: false, _lastResult: null,
+  EVERY_MS: 1800000,
+  ABBR: { "injured reserve": "IR", "out": "O", "questionable": "Q", "doubtful": "D", "physically unable to perform": "PUP", "suspension": "SUSP", "suspended": "SUSP", "day-to-day": "DTD", "non football injury": "NFI", "non-football injury": "NFI" },
+  short(status) {
+    const k = String(status || "").toLowerCase().trim();
+    if (!k || k === "active" || k === "healthy" || k === "probable") return null;
+    if (this.ABBR[k]) return this.ABBR[k];
+    return k.split(/[^a-z0-9]+/).filter(Boolean).map(w => w[0]).join("").toUpperCase().slice(0, 4) || null;
+  },
+  tick(force = false) {
+    if (!App.state || this._running) return;
+    if (!force) {
+      if (Date.now() - this._last < 60000) return;
+      const im = App.state.settings.injury_meta;
+      if (im && im.updated_at && Date.now() - new Date(im.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
+    }
+    this._last = Date.now();
+    this.sync().catch(e => { this._lastResult = { error: e.message }; });
+  },
+  async sync(manual = false) {
+    if (this._running) return;
+    this._running = true;
+    try {
+      const s = App.state;
+      const res = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries")).json();
+      const teams = res.injuries || res.teams || res.items || [];
+      const nm = LiveSync.nameMap();
+      const players = {};
+      let listed = 0;
+      for (const team of teams) {
+        for (const inj of (team.injuries || [])) {
+          listed++;
+          const a = inj.athlete || {};
+          const p = nm[LiveSync.norm(a.displayName || a.fullName || "")];
+          if (!p) continue;
+          const full = String(inj.status || ((inj.type || {}).description) || ((inj.details || {}).type) || "").trim();
+          const st = this.short(full);
+          if (!st) continue;
+          players[p.id] = { st, full };
+        }
+      }
+      const old = (s.settings.injury_meta || {}).players || {};
+      const changed = JSON.stringify(old) !== JSON.stringify(players);
+      await App.store.saveSetting("injury_meta", { updated_at: new Date().toISOString(), players });
+      this._lastResult = { listed, matched: Object.keys(players).length, at: new Date().toISOString() };
+      if (manual) toast(`Injury report synced: ${Object.keys(players).length} pool players flagged`);
+      if (changed) await App.queueRefresh();
     } finally { this._running = false; }
   }
 };
