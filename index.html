@@ -19,7 +19,9 @@
 html{-webkit-text-size-adjust:100%}
 body{background:var(--ink);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.45;padding-bottom:60px}
 button{font-family:var(--body);cursor:pointer;border:none}
-input,select{font-family:var(--body);background:var(--ink);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:15px}
+input,select,textarea{font-family:var(--body);background:var(--ink);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font-size:15px}
+.rulelist{margin:4px 0 0 18px;padding:0;color:var(--muted);font-size:13.5px}
+.rulelist li{margin:4px 0}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
 a{color:var(--gold)}
 .tm{font-size:.55em;vertical-align:super;opacity:.75}
@@ -340,6 +342,17 @@ const ROSTER_CAP = 7;
 function projFor(p) { return !p || p.pts_2025 == null ? null : p.pts_2025 / 17; }
 function liveMeta(state) { return state.settings.live_meta || { players: {} }; }
 function playerMeta(state, playerId) { return (liveMeta(state).players || {})[playerId] || null; }
+function gameInfoFor(state, playerId, week) {
+  const lm = liveMeta(state);
+  if (lm.week === week && (lm.players || {})[playerId]) return lm.players[playerId];
+  const rm = state.settings.roster_meta;
+  const abbr = rm && rm.teams ? rm.teams[playerId] : null;
+  if (!abbr) return null;
+  const gt = GameTimes.get(week);
+  if (!gt) return null;
+  if (gt[abbr]) return gt[abbr];
+  return Object.keys(gt).length ? { st: "bye", dt: "BYE", opp: "", home: false } : null;
+}
 function injuryMeta(state) { return state.settings.injury_meta || { players: {} }; }
 function playerInjury(state, playerId) { return (injuryMeta(state).players || {})[playerId] || null; }
 function injBadge(state, playerId) { const i = playerInjury(state, playerId); return i ? ` <span class="pill inj" title="${esc(i.full || i.st)}">${esc(i.st)}</span>` : ""; }
@@ -352,15 +365,19 @@ function teamWeekProj(state, teamId, week) {
     const p = state.players.find(x => x.id === pid);
     const pts = playerWeekPoints(state, pid, week);
     const pj = projFor(p) || 0;
-    const m = playerMeta(state, pid);
+    const m = gameInfoFor(state, pid, week);
     const hasStats = state.stats.some(x => x.player_id === pid && x.week === week);
-    if (m && m.st === "post") sum += pts;
+    if (m && (m.st === "post" || m.st === "bye")) sum += pts;
     else if (m && m.st === "in") sum += Math.max(pts, pj);
     else sum += hasStats ? pts : pj;
   }
   return sum;
 }
 function tradesOf(state) { return state.settings.trades || []; }
+function generalRules(state) {
+  const g = state.settings.general_rules;
+  return (g && g.items && g.items.length) ? g.items : ["Any player we work with during the season is added to the league."];
+}
 
 /* ============================================================
    STORES: identical async API. SupaStore (shared) / LocalStore (preview).
@@ -596,6 +613,8 @@ const App = {
     setTimeout(() => LiveSync.tick(), 4000);
     setInterval(() => InjurySync.tick(), 60000);
     setTimeout(() => InjurySync.tick(), 2500);
+    setInterval(() => RosterSync.tick(), 3600000);
+    setTimeout(() => RosterSync.tick(), 6000);
   },
   go() {
     let t = (location.hash || "#team").slice(1);
@@ -1051,7 +1070,7 @@ const Views = {
       const tradeable = canTrade && t.id !== me.id;
       return `<div class="card">
         <h2>${tmName(t)}</h2>
-        <p class="sub">${esc(t.owner)} &middot; ${r.w}-${r.l}${r.t ? "-" + r.t : ""} &middot; PF ${fmt1(r.pf)}${tradeable ? ` &middot; <span style="color:var(--gold)">tap a player to offer a trade</span>` : ""}</p>
+        <p class="sub">${esc(t.owner)} &middot; ${r.w}-${r.l}${r.t ? "-" + r.t : ""} &middot; PF ${fmt1(r.pf)}</p>
         <div class="tablewrap" style="margin-top:8px"><table>
           ${mine.map(p => `<tr${tradeable ? ` class="rowlink" onclick="Views.tradeStart(${p.id})"` : ""}><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
         </table></div>
@@ -1367,14 +1386,13 @@ const Views = {
         ${slotRow("rb","RB")}${slotRow("wr","WR")}${slotRow("def","DEF")}${slotRow("util","UTIL")}
         <h3 style="margin-top:14px">Bench</h3>
         ${benchRows || `<p class="sub">Empty benches</p>`}
-        <p class="sub" style="margin-top:10px">Bench points don't count. Stats flow in automatically while games are on.</p>
       </div>`;
   },
   _muxPlayer(pid, wk, right) {
     if (!pid) return `<div class="pcell${right ? " right" : ""}"><div class="pname sub">Empty</div></div>`;
     const s = App.state, p = s.players.find(x => x.id === pid);
     if (!p) return `<div class="pcell"></div>`;
-    const m = playerMeta(s, pid);
+    const m = gameInfoFor(s, pid, wk);
     const line = this._statLine(pid, wk);
     const status = m ? `${m.opp ? (m.home ? "vs " : "@ ") + esc(m.opp) + " &middot; " : ""}${esc(m.dt || "")}` : "";
     return `<div class="pcell${right ? " right" : ""}">
@@ -1402,7 +1420,7 @@ const Views = {
     if (!pid) return `<span class="sub">&mdash;</span>`;
     const s = App.state;
     const p = s.players.find(x => x.id === pid);
-    const m = playerMeta(s, pid);
+    const m = gameInfoFor(s, pid, wk);
     const has = s.stats.some(x => x.player_id === pid && x.week === wk);
     if (has || (m && m.st !== "pre")) return fmt1(playerWeekPoints(s, pid, wk));
     const pj = projFor(p);
@@ -1446,13 +1464,12 @@ const Views = {
         <div class="card">
           <h2>League Rules</h2>
           <p><b>${esc(s.settings.league.name)}</b> &middot; ${esc(s.settings.league.type)} &middot; ${s.settings.league.teams} teams</p>
-          <p class="sub" style="margin-top:6px">Buy-in $${s.settings.league.buy_in} &middot; Pot $${s.settings.league.pot} &middot; Payouts: ${esc(s.settings.payouts.note)}</p>
           <h3>Rosters</h3>
           <p class="sub">1 RB &middot; 1 WR &middot; 1 DEF (any of LB/S/CB/DE/DT) &middot; 1 UTIL (any) &middot; 3 Bench</p>
           <h3>Season</h3>
           <p class="sub">15-week regular season, rotating bye (one team off each week). Everyone plays everyone 3 times. Weeks 16-17: playoffs, top 4 seeds. Lineups lock ${esc(s.settings.season_dates.lineup_lock)}.</p>
-          <h3>Draft</h3>
-          <p class="sub">Snake &middot; ${ROUNDS} rounds &middot; ${PICK_SECONDS} seconds per pick &middot; Order: ${s.teams.map(t => esc(t.owner)).join(" &rarr; ")}</p>
+          <h3>General Rules</h3>
+          <ul class="rulelist">${generalRules(s).map(r => `<li>${esc(r)}</li>`).join("")}</ul>
         </div>
         <div class="card">
           <h2>Scoring</h2>
@@ -1512,11 +1529,12 @@ const Views = {
       </div>
       <div class="card">
         <h2>Live Stat Feed</h2>
-        <p class="sub">Pulls real NFL box scores every few minutes while anyone has the site open, writes them into the week, and every matchup recalculates on its own. The manual grid below is the backup and takes over once a week is marked final. One gap: box scores only show fumble recoveries, not forced fumbles, so add FF by hand before finalizing a week.</p>
+        <p class="sub">Pulls real NFL box scores every few minutes while anyone has the site open, writes them into the week, and every matchup recalculates on its own. The manual grid below is the backup and takes over once a week is marked final. One gap: box scores only show fumble recoveries, not forced fumbles, so add FF by hand before finalizing a week. Game times and live status in Matchup come from a weekly team map, synced automatically.</p>
         <div class="btnrow" style="margin-top:8px">
           <button class="btn gold" onclick="LiveSync.sync(${wk}, true)">Sync week ${wk} now</button>
           <button class="btn" onclick="Views._toggleFeed()">${this._feedOn() ? "Turn auto-sync off" : "Turn auto-sync on"}</button>
           <button class="btn" onclick="InjurySync.sync(true)">Sync injuries now</button>
+          <button class="btn" onclick="RosterSync.sync(true)">Sync team map</button>
         </div>
         <p class="sub" style="margin-top:8px">${this._feedStatus()}</p>
       </div>
@@ -1558,10 +1576,15 @@ const Views = {
           </div>`).join("")}
       </div>
       <div class="card">
-        <h2>Payouts</h2>
-        <div class="frow"><input id="payout-in" value="${esc(s.settings.payouts.note)}" style="flex:1">
-        <button class="btn sm" onclick="App.mutate(()=>App.store.saveSetting('payouts',{note:$('payout-in').value}),'Payouts updated')">Save</button></div>
+        <h2>General Rules</h2>
+        <p class="sub">Shown on the League page. One rule per line.</p>
+        <textarea id="gr-in" rows="4" style="width:100%;margin-top:6px">${generalRules(s).map(r => esc(r)).join("\n")}</textarea>
+        <div class="btnrow" style="margin-top:8px"><button class="btn sm" onclick="Views.saveRules()">Save rules</button></div>
       </div>`;
+  },
+  saveRules() {
+    const items = $("gr-in").value.split("\n").map(x => x.trim()).filter(Boolean);
+    App.mutate(() => App.store.saveSetting("general_rules", { items }), "General rules saved");
   },
   saveTeam(teamId) {
     const name = $("tn-" + teamId).value.trim();
@@ -1589,6 +1612,11 @@ const Views = {
     else if (r) bits.push(`This device: ${r.games} games read, ${r.matched} players matched, ${r.updated} stat lines updated`);
     const im = App.state.settings.injury_meta;
     bits.push(im && im.updated_at ? `Injuries: ${Object.keys(im.players || {}).length} flagged, updated ${when(im.updated_at)}` : "Injuries: not synced yet");
+    const rm = App.state.settings.roster_meta;
+    const rr = RosterSync._lastResult;
+    if (RosterSync._running) bits.push("Team map: syncing now...");
+    else if (rr && rr.error) bits.push(`Team map sync failed on this device: ${esc(rr.error)}`);
+    else bits.push(rm && rm.updated_at ? `Team map: ${Object.keys(rm.teams || {}).length} of ${App.state.players.length} players mapped, updated ${when(rm.updated_at)}` : "Team map: not synced yet");
     return bits.join(" &middot; ");
   },
   saveStats(week) {
@@ -1767,6 +1795,104 @@ const InjurySync = {
       this._lastResult = { listed, matched: Object.keys(players).length, at: new Date().toISOString() };
       if (manual) toast(`Injury report synced: ${Object.keys(players).length} pool players flagged`);
       if (changed) await App.queueRefresh();
+    } finally { this._running = false; }
+  }
+};
+
+/* Per-week NFL schedule cache: kickoff times + live game state per team.
+   In-memory only, fetched on demand for whichever week is being viewed. */
+const GameTimes = {
+  _cache: {}, _pending: {},
+  kickLabel(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }).formatToParts(d);
+    const g = t => (parts.find(x => x.type === t) || {}).value || "";
+    return `${g("weekday")} ${g("hour")}:${g("minute")} ${g("dayPeriod")}`.replace(/\s+/g, " ").trim();
+  },
+  get(week) {
+    const c = this._cache[week];
+    const cur = App.state ? currentWeek(App.state) : 0;
+    const maxAge = c && c.err ? 60000 : (week === cur ? 240000 : 3600000);
+    if (c && Date.now() - c.at < maxAge) return c.teams;
+    if (!this._pending[week]) this._pending[week] = this.fetch(week).finally(() => { delete this._pending[week]; });
+    return c ? c.teams : null;
+  },
+  async fetch(week) {
+    try {
+      const s = App.state;
+      const season = (s.settings.league || {}).season || new Date().getFullYear();
+      const sb = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=${season}`)).json();
+      const teams = {};
+      for (const ev of (sb.events || [])) {
+        const comp = (ev.competitions || [])[0]; if (!comp) continue;
+        const st = ((ev.status || {}).type || {}).state || "pre";
+        const detail = ((ev.status || {}).type || {}).shortDetail || "";
+        const dt = st === "pre" ? this.kickLabel(ev.date) : st === "post" ? "Final" : detail;
+        const cs = comp.competitors || [];
+        for (const c of cs) {
+          const abbr = ((c.team || {}).abbreviation) || ""; if (!abbr) continue;
+          const opp = cs.find(x => x !== c);
+          teams[abbr] = { st, dt, opp: opp ? (((opp.team || {}).abbreviation) || "") : "", home: c.homeAway === "home" };
+        }
+      }
+      this._cache[week] = { at: Date.now(), teams };
+      if (App.tab === "matchup" || App.tab === "team") UI.render();
+    } catch (e) {
+      this._cache[week] = { at: Date.now(), teams: (this._cache[week] || {}).teams || {}, err: true };
+    }
+  }
+};
+
+/* Weekly ESPN roster pull: maps our pool players to their real NFL team by name.
+   Display names and the pool's custom nfl_team labels are never touched. */
+const RosterSync = {
+  _last: 0, _running: false, _lastResult: null,
+  EVERY_MS: 604800000,
+  tick(force = false) {
+    if (!App.state || this._running) return;
+    if (!force) {
+      if (Date.now() - this._last < 3600000) return;
+      const rm = App.state.settings.roster_meta;
+      if (rm && rm.updated_at && Date.now() - new Date(rm.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
+    }
+    this._last = Date.now();
+    this.sync().catch(() => {});
+  },
+  async sync(manual = false) {
+    if (this._running) return;
+    this._running = true;
+    try {
+      const s = App.state;
+      const tl = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=32")).json();
+      const teams = ((((tl.sports || [])[0] || {}).leagues || [])[0] || {}).teams || [];
+      const nm = LiveSync.nameMap();
+      const map = {};
+      await Promise.all(teams.map(async t => {
+        const team = t.team || {};
+        const abbr = team.abbreviation || "";
+        if (!team.id || !abbr) return;
+        let rj;
+        try { rj = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${team.id}/roster`)).json(); }
+        catch (e) { return; }
+        for (const grp of (rj.athletes || [])) {
+          const list = grp.items || grp.athletes || ((grp.displayName || grp.fullName) ? [grp] : []);
+          for (const a of list) {
+            const p = nm[LiveSync.norm(a.displayName || a.fullName || "")];
+            if (p) map[p.id] = abbr;
+          }
+        }
+      }));
+      if (!Object.keys(map).length) throw new Error("no players matched, map left unchanged");
+      const old = (s.settings.roster_meta || {}).teams || {};
+      const changed = JSON.stringify(old) !== JSON.stringify(map);
+      await App.store.saveSetting("roster_meta", { updated_at: new Date().toISOString(), teams: map });
+      this._lastResult = { mapped: Object.keys(map).length, at: new Date().toISOString() };
+      if (manual) toast(`Team map synced: ${Object.keys(map).length} of ${s.players.length} pool players matched`);
+      if (changed) { GameTimes._cache = {}; await App.queueRefresh(); }
+    } catch (e) {
+      this._lastResult = { error: e.message };
+      if (manual) toast("Team map sync failed: " + e.message);
     } finally { this._running = false; }
   }
 };
