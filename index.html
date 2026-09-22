@@ -298,11 +298,24 @@ function teamWeekScore(state, teamId, week) {
 function weekGames(state, week) { return state.schedule.filter(s => s.week === week && s.game > 0); }
 function weekBye(state, week) { const b = state.schedule.find(s => s.week === week && s.game === 0); return b ? b.bye : null; }
 function finalWeeks(state) { return state.settings.final_weeks || []; }
+/* a week is complete once Monday night is over: Tuesday 6:00 AM ET after that week's Sunday */
+function weekCompleteAt(state, week) {
+  const [y, m, d] = state.settings.season_dates.week1_sunday.split("-").map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d + (week - 1) * 7 + 2, 12, 0));
+  return etDate(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 6, 0);
+}
+function weekComplete(state, week) { return Date.now() >= weekCompleteAt(state, week).getTime(); }
+/* a week counts once the commish marks it final OR the calendar says it's complete */
+function weekIsFinal(state, week) { return finalWeeks(state).includes(week) || weekComplete(state, week); }
+function countedWeeks(state) {
+  const n = state.settings.season_dates.reg_season_weeks, out = [];
+  for (let w = 1; w <= n; w++) if (weekIsFinal(state, w)) out.push(w);
+  return out;
+}
 function standings(state) {
   const rows = state.teams.map(t => ({ team: t, w: 0, l: 0, t: 0, pf: 0, pa: 0 }));
   const rm = Object.fromEntries(rows.map(r => [r.team.id, r]));
-  for (const wk of finalWeeks(state)) {
-    if (wk > state.settings.season_dates.reg_season_weeks) continue;
+  for (const wk of countedWeeks(state)) {
     for (const g of weekGames(state, wk)) {
       if (!g.team_a || !g.team_b) continue;
       const sa = teamWeekScore(state, g.team_a, wk), sb = teamWeekScore(state, g.team_b, wk);
@@ -313,7 +326,8 @@ function standings(state) {
       else { rm[g.team_a].t++; rm[g.team_b].t++; }
     }
   }
-  rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf));
+  const pct = r => { const g = r.w + r.l + r.t; return g ? (r.w + r.t / 2) / g : 0; };
+  rows.sort((a, b) => (pct(b) - pct(a)) || (b.w - a.w) || (b.pf - a.pf));
   return rows;
 }
 
@@ -1313,7 +1327,7 @@ const Views = {
   scoreboardCard() {
     const s = App.state;
     const wk = this._mwk || Math.min(currentWeek(s), 17);
-    const isFinal = finalWeeks(s).includes(wk);
+    const isFinal = weekIsFinal(s, wk);
     const games = weekGames(s, wk);
     const bye = weekBye(s, wk);
     const tm = byId(s.teams);
@@ -1346,7 +1360,7 @@ const Views = {
   matchup() {
     const s = App.state, me = App.myTeam();
     const wk = this._xwk || Math.min(currentWeek(s), 17);
-    const isFinal = finalWeeks(s).includes(wk);
+    const isFinal = weekIsFinal(s, wk);
     const sel = `<select onchange="Views._xwk=+this.value;UI.render()">${Array.from({length:17},(_,i)=>i+1).map(w =>
       `<option value="${w}" ${w === wk ? "selected" : ""}>Week ${w}${w === 16 ? " (Semifinals)" : w === 17 ? " (Championship)" : ""}</option>`).join("")}</select>`;
     if (!me) return `<div class="card"><h2>Matchup</h2><p class="sub">Sign in to see your head-to-head.</p><div class="btnrow"><button class="btn gold" onclick="UI.identity()">Sign in</button></div></div>`;
@@ -1435,7 +1449,7 @@ const Views = {
     return `
       <div class="card">
         <h2>Standings</h2>
-        <p class="sub">Top 4 make the playoffs. Weeks 1-15, then semis week 16, championship week 17.</p>
+        <p class="sub">Top 4 make the playoffs. Weeks 1-15, then semis week 16, championship week 17. Updates on its own every Tuesday morning once Monday night is done.</p>
         <div class="tablewrap" style="margin-top:10px"><table>
           <tr><th class="num">#</th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">T</th><th class="num">PF</th><th class="num">PA</th></tr>
           ${rows.map((r, i) => `<tr class="${me && r.team.id === me.id ? "mine" : ""}">
@@ -1553,7 +1567,7 @@ const Views = {
           <tr><th>Player</th><th>TD</th><th>Yds</th><th>Rec</th><th>Fum</th><th>Solo</th><th>Ast</th><th>Sack</th><th>INT</th><th>PBU</th><th>FF/FR</th><th class="num">Pts</th></tr>
           ${statRows || `<tr><td colspan="12" class="empty">No rostered players yet</td></tr>`}
         </table></div>
-        <p class="sub" style="margin-top:8px">Marking a week final counts it in standings and shows FINAL on matchups.</p>
+        <p class="sub" style="margin-top:8px">Completed weeks count in standings and show FINAL on their own every Tuesday morning. Marking a week final freezes it: the feed stops writing and this grid becomes the source of truth.</p>
       </div>
       <div class="card">
         <h2>Playoffs (Weeks 16-17)</h2>
@@ -1674,7 +1688,19 @@ const LiveSync = {
       if (lm && lm.updated_at && Date.now() - new Date(lm.updated_at).getTime() < this.EVERY_MS - 30000) { this._last = Date.now(); return; }
     }
     this._last = Date.now();
-    this.sync(Math.min(currentWeek(App.state), 17), force).catch(e => { this._lastResult = { error: e.message }; });
+    const cw = Math.min(currentWeek(App.state), 17);
+    this.sync(cw, force).then(() => this.backfill(cw)).catch(e => { this._lastResult = { error: e.message }; });
+  },
+  _backfilled: {},
+  /* completed weeks with no stats at all (nobody had the site open that week): pull them once so standings stay honest */
+  async backfill(cw) {
+    for (let w = 1; w < cw; w++) {
+      const s = App.state; if (!s) return;
+      if (this._backfilled[w] || finalWeeks(s).includes(w) || !weekComplete(s, w)) continue;
+      this._backfilled[w] = true;
+      if (s.stats.some(x => x.week === w)) continue;
+      await this.sync(w, false);
+    }
   },
   async sync(week, manual = false) {
     if (this._running) return;
@@ -1735,7 +1761,7 @@ const LiveSync = {
         if (!same) rows.push(out);
       }
       if (rows.length) await App.store.saveStats(rows);
-      await App.store.saveSetting("live_meta", { week, updated_at: new Date().toISOString(), players: meta });
+      if (week === Math.min(currentWeek(s), 17)) await App.store.saveSetting("live_meta", { week, updated_at: new Date().toISOString(), players: meta });
       this._lastResult = { week, games: gamesRead, matched: Object.keys(acc).length, updated: rows.length, at: new Date().toISOString() };
       if (manual) toast(`Feed: ${gamesRead} games read, ${rows.length} stat lines updated`);
       await App.queueRefresh();
