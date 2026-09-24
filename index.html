@@ -365,12 +365,30 @@ function currentWeek(state) {
 
 /* projections, live game meta, trades */
 const ROSTER_CAP = 7;
-/* season points to date: every stat line the feed (or the commish grid) has written, all weeks */
+/* season points: only weeks that have closed (Tuesday 6:00 AM ET) or been marked final, so totals move once a week */
 function seasonPoints(state, playerId) {
   let sum = 0;
-  for (const row of state.stats) if (row.player_id === playerId) sum += statPoints(row, state.settings.scoring);
+  const closed = {};
+  for (const row of state.stats) {
+    if (row.player_id !== playerId) continue;
+    if (closed[row.week] === undefined) closed[row.week] = weekIsFinal(state, row.week);
+    if (closed[row.week]) sum += statPoints(row, state.settings.scoring);
+  }
   return sum;
 }
+function lastClosedWeek(state) { let last = 0; for (let w = 1; w <= 17; w++) if (weekIsFinal(state, w)) last = w; return last; }
+/* week label: Final once closed, Live once the week's first NFL game has kicked off, Upcoming before that */
+function weekStarted(state, week) {
+  if (weekIsFinal(state, week)) return true;
+  if (state.stats.some(x => x.week === week)) return true;
+  const lm = liveMeta(state);
+  if (lm.week === week && Object.keys(lm.players || {}).length) return true;
+  const gt = GameTimes.get(week);
+  if (gt) for (const k in gt) { const g = gt[k]; if (g.st === "in" || g.st === "post" || (g.kick && Date.now() >= new Date(g.kick).getTime())) return true; }
+  return false;
+}
+function weekStatus(state, week) { return weekIsFinal(state, week) ? "Final" : weekStarted(state, week) ? "Live" : "Upcoming"; }
+function weekPill(state, week) { const st = weekStatus(state, week); return st === "Live" ? `<span class="pill live">Live</span>` : `<span class="pill bye">${st}</span>`; }
 function seasonLabel(state) { return String((state.settings.league || {}).season || new Date().getFullYear()); }
 function liveMeta(state) { return state.settings.live_meta || { players: {} }; }
 function playerMeta(state, playerId) { return (liveMeta(state).players || {})[playerId] || null; }
@@ -1046,7 +1064,7 @@ const Views = {
           ${locked ? `<span class="pill bye">Locked</span>` : lockMode(s, wk) === "open" ? `<span class="pill own">Unlocked by commish</span>` : `<span class="sub">Players lock at kickoff &middot; next week opens Tue 6 AM ET</span>`}
           ${lu.auto ? `<span class="pill bye">Auto-set</span>` : ""}
         </div>
-        <div class="sub" style="text-align:right;margin-top:8px">${seasonLabel(s)} season pts</div>
+        <div class="sub" style="text-align:right;margin-top:8px">${seasonLabel(s)} season pts${lastClosedWeek(s) ? ` through Week ${lastClosedWeek(s)}` : ""}</div>
         ${slotRow("RB","rb",p => p.pos === "RB")}
         ${slotRow("WR","wr",p => p.pos === "WR")}
         ${slotRow("DEF","def",p => DEF_POS.includes(p.pos))}
@@ -1379,7 +1397,7 @@ const Views = {
         <div class="frow">
           <select onchange="Views._mwk=+this.value;UI.render()">${Array.from({length:17},(_,i)=>i+1).map(w =>
             `<option value="${w}" ${w === wk ? "selected" : ""}>Week ${w}${w === 16 ? " (Semifinals)" : w === 17 ? " (Championship)" : ""}</option>`).join("")}</select>
-          ${isFinal ? `<span class="pill bye">Final</span>` : `<span class="pill live" style="animation:none;background:var(--raised);border:1px solid var(--line);color:var(--muted)">Live totals</span>`}
+          ${weekPill(s, wk)}
         </div>
         ${cards || `<p class="empty">No games this week</p>`}
         ${bye ? `<div class="mu"><div class="side"><div class="tn">${esc(tm[bye].name)}<span class="tm">™</span></div><div class="sub">${esc(tm[bye].owner)}</div></div><span class="pill bye">BYE WEEK</span></div>` : ""}
@@ -1421,7 +1439,7 @@ const Views = {
       `<div class="prow dim">${this._muxPlayer((benchA[i] || {}).id, wk, false)}<div class="ppts">${this._muxPts((benchA[i] || {}).id, wk)}</div><div class="slotmid">BE</div><div class="ppts">${this._muxPts((benchB[i] || {}).id, wk)}</div>${this._muxPlayer((benchB[i] || {}).id, wk, true)}</div>`).join("");
     return `
       <div class="card">
-        <div class="frow" style="justify-content:space-between">${sel}${isFinal ? `<span class="pill bye">Final</span>` : `<span class="pill bye">Live</span>`}</div>
+        <div class="frow" style="justify-content:space-between">${sel}${weekPill(s, wk)}</div>
         <div class="mux-head">
           <div class="mh-side"><div class="tn ${aw ? "win" : ""}">${tmName(A)}</div><div class="sub">${esc(A.owner)} &middot; ${rec(rA)}</div><div class="mh-sc ${aw ? "win" : ""}">${fmt1(sa)}</div></div>
           <div class="mh-mid">WK ${wk}</div>
