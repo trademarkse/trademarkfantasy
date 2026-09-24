@@ -365,7 +365,13 @@ function currentWeek(state) {
 
 /* projections, live game meta, trades */
 const ROSTER_CAP = 7;
-function projFor(p) { return !p || p.pts_2025 == null ? null : p.pts_2025 / 17; }
+/* season points to date: every stat line the feed (or the commish grid) has written, all weeks */
+function seasonPoints(state, playerId) {
+  let sum = 0;
+  for (const row of state.stats) if (row.player_id === playerId) sum += statPoints(row, state.settings.scoring);
+  return sum;
+}
+function seasonLabel(state) { return String((state.settings.league || {}).season || new Date().getFullYear()); }
 function liveMeta(state) { return state.settings.live_meta || { players: {} }; }
 function playerMeta(state, playerId) { return (liveMeta(state).players || {})[playerId] || null; }
 function gameInfoFor(state, playerId, week) {
@@ -380,25 +386,18 @@ function gameInfoFor(state, playerId, week) {
   return Object.keys(gt).length ? { st: "bye", dt: "BYE", opp: "", home: false } : null;
 }
 function injuryMeta(state) { return state.settings.injury_meta || { players: {} }; }
-function playerInjury(state, playerId) { return (injuryMeta(state).players || {})[playerId] || null; }
-function injBadge(state, playerId) { const i = playerInjury(state, playerId); return i ? ` <span class="pill inj" title="${esc(i.full || i.st)}">${esc(i.st)}</span>` : ""; }
-function injText(state, playerId) { const i = playerInjury(state, playerId); return i ? ` \u00b7 ${i.st}` : ""; }
-function teamWeekProj(state, teamId, week) {
-  const lu = lineupFor(state, teamId, week);
-  let sum = 0;
-  for (const pid of [lu.rb, lu.wr, lu.def, lu.util]) {
-    if (!pid) continue;
-    const p = state.players.find(x => x.id === pid);
-    const pts = playerWeekPoints(state, pid, week);
-    const pj = projFor(p) || 0;
-    const m = gameInfoFor(state, pid, week);
-    const hasStats = state.stats.some(x => x.player_id === pid && x.week === week);
-    if (m && (m.st === "post" || m.st === "bye")) sum += pts;
-    else if (m && m.st === "in") sum += Math.max(pts, pj);
-    else sum += hasStats ? pts : pj;
-  }
-  return sum;
+function playerInjury(state, playerId) {
+  const i = (injuryMeta(state).players || {})[playerId];
+  if (i) return i;
+  return (((state.settings.roster_meta || {}).flags) || {})[playerId] || null;
 }
+function injTitle(i) {
+  const d = i.date ? new Date(i.date) : null;
+  const when = d && !isNaN(d) ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : "";
+  return [i.full || i.st, i.type, when ? "updated " + when : ""].filter(Boolean).join(" \u00b7 ");
+}
+function injBadge(state, playerId) { const i = playerInjury(state, playerId); return i ? ` <span class="pill inj" title="${esc(injTitle(i))}">${esc(i.st)}</span>` : ""; }
+function injText(state, playerId) { const i = playerInjury(state, playerId); return i ? ` \u00b7 ${i.st}` : ""; }
 function tradesOf(state) { return state.settings.trades || []; }
 function generalRules(state) {
   const g = state.settings.general_rules;
@@ -899,6 +898,9 @@ const Views = {
       (!q || p.name.toLowerCase().includes(q) || p.nfl_team.toLowerCase().includes(q)) &&
       (posF === "ALL" || (posF === "DEF" ? DEF_POS.includes(p.pos) : p.pos === posF)) &&
       (!faOnly || !taken.has(p.id)));
+    const sp = {}; for (const p of s.players) sp[p.id] = seasonPoints(s, p.id);
+    const srank = {}; [...s.players].sort((a, b) => (sp[b.id] - sp[a.id]) || (a.rank - b.rank)).forEach((p, i) => { srank[p.id] = i + 1; });
+    rows.sort((a, b) => srank[a.id] - srank[b.id]);
     const team = onClockTeam(s);
     const canDraft = liveDraft && s.draft.status === "live" && team && App.me() === team.id;
     const postDraft = s.draft.status === "done";
@@ -911,11 +913,11 @@ const Views = {
       else if (postDraft && !owner && me) action = `<button class="btn sm" onclick="Views.addPlayer(${p.id})">Add</button>`;
       const status = owner ? `<span class="pill own">${esc(owner.owner)}</span>` : `<span class="pill fa">FA</span>`;
       return `<tr class="${owner && me && owner.id === me.id ? "mine" : ""}${clickable ? " pickable" : ""}" ${clickable ? `onclick="Draft.confirmPick(${p.id})"` : ""}>
-        <td class="num">${p.rank}</td>
+        <td class="num">${srank[p.id]}</td>
         <td>${esc(p.name)}${injBadge(s, p.id)} ${p.rookie ? '<span class="pill rk">R</span>' : ""}</td>
         <td><span class="pill pos">${esc(p.pos)}</span></td>
         <td class="sub">${esc(p.nfl_team)}</td>
-        <td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td>
+        <td class="num">${fmt1(sp[p.id])}</td>
         <td>${status}</td><td>${action}</td></tr>`;
     }).join("");
     return `
@@ -929,7 +931,7 @@ const Views = {
           <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" ${faOnly ? "checked" : ""} onchange="Views._fa=this.checked;UI.render()"> Available Players</label>
         </div>
         <div class="tablewrap"><table>
-          <tr><th class="num">RK</th><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025 Pts</th><th>Status</th><th></th></tr>
+          <tr><th class="num">RK</th><th>Player</th><th>Pos</th><th>Team</th><th class="num">${seasonLabel(s)} Pts</th><th>Status</th><th></th></tr>
           ${html || `<tr><td colspan="7" class="empty">No players match</td></tr>`}
         </table></div>
       </div>`;
@@ -1021,7 +1023,7 @@ const Views = {
       return `
       <div class="slot"><div class="tag">${tag}</div>
         ${sel}
-        <div class="pt">${fmt1(cur ? playerWeekPoints(s, cur, wk) : 0)}</div>
+        <div class="pt">${cur ? fmt1(seasonPoints(s, cur)) : "&mdash;"}</div>
       </div>`;
     };
     const benchIds = mine.filter(p => ![lu.rb, lu.wr, lu.def, lu.util].includes(p.id));
@@ -1044,19 +1046,21 @@ const Views = {
           ${locked ? `<span class="pill bye">Locked</span>` : lockMode(s, wk) === "open" ? `<span class="pill own">Unlocked by commish</span>` : `<span class="sub">Players lock at kickoff &middot; next week opens Tue 6 AM ET</span>`}
           ${lu.auto ? `<span class="pill bye">Auto-set</span>` : ""}
         </div>
+        <div class="sub" style="text-align:right;margin-top:8px">${seasonLabel(s)} season pts</div>
         ${slotRow("RB","rb",p => p.pos === "RB")}
         ${slotRow("WR","wr",p => p.pos === "WR")}
         ${slotRow("DEF","def",p => DEF_POS.includes(p.pos))}
         ${slotRow("UTIL","util",() => true)}
         <h3>Bench</h3>
-        ${benchIds.length ? benchIds.map(p => `<div class="slot"><div class="tag" style="color:var(--muted)">BE</div><div style="flex:1">${esc(p.name)}${injBadge(s, p.id)} <span class="pill pos">${esc(p.pos)}</span>${!locked && playerLocked(s, p.id, wk) ? ` <span class="pill bye">Locked</span>` : ""}</div><div class="pt">${fmt1(playerWeekPoints(s, p.id, wk))}</div></div>`).join("") : `<p class="sub">Empty bench</p>`}
+        ${benchIds.length ? benchIds.map(p => `<div class="slot"><div class="tag" style="color:var(--muted)">BE</div><div style="flex:1">${esc(p.name)}${injBadge(s, p.id)} <span class="pill pos">${esc(p.pos)}</span>${!locked && playerLocked(s, p.id, wk) ? ` <span class="pill bye">Locked</span>` : ""}</div><div class="pt">${fmt1(seasonPoints(s, p.id))}</div></div>`).join("") : `<p class="sub">Empty bench</p>`}
         ${!locked ? `<div class="btnrow"><button class="btn gold" onclick="Views.saveLineup(${wk})">Save lineup</button></div>` : ""}
+        <p class="sub" style="margin-top:8px">${(() => { const im = s.settings.injury_meta; return im && im.updated_at ? `Injury report via ESPN, updated ${new Date(im.updated_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET` : "Injury report not synced yet"; })()}</p>
       </div>
       <div class="card">
         <h2>Roster</h2>
         <div class="tablewrap"><table>
-          <tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">2025</th><th>Via</th><th></th></tr>
-          ${mine.map(p => `<tr><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td><td class="sub">${(s.roster.find(r => r.player_id === p.id) || {}).acquired === "fa" ? "FA" : "Draft"}</td><td>${s.draft.status === "done" ? `<button class="btn sm" onclick="Views.dropPlayer(${p.id})">Drop</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No players yet. See you at the draft.</td></tr>`}
+          <tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">${seasonLabel(s)}</th><th>Via</th><th></th></tr>
+          ${mine.map(p => `<tr><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${fmt1(seasonPoints(s, p.id))}</td><td class="sub">${(s.roster.find(r => r.player_id === p.id) || {}).acquired === "fa" ? "FA" : "Draft"}</td><td>${s.draft.status === "done" ? `<button class="btn sm" onclick="Views.dropPlayer(${p.id})">Drop</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No players yet. See you at the draft.</td></tr>`}
         </table></div>
       </div>`;
   },
@@ -1113,7 +1117,7 @@ const Views = {
         <h2>${tmName(t)}</h2>
         <p class="sub">${esc(t.owner)} &middot; ${r.w}-${r.l}${r.t ? "-" + r.t : ""} &middot; PF ${fmt1(r.pf)}</p>
         <div class="tablewrap" style="margin-top:8px"><table>
-          ${mine.map(p => `<tr${tradeable ? ` class="rowlink" onclick="Views.tradeStart(${p.id})"` : ""}><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${p.pts_2025 == null ? "&mdash;" : fmt1(p.pts_2025)}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
+          ${mine.map(p => `<tr${tradeable ? ` class="rowlink" onclick="Views.tradeStart(${p.id})"` : ""}><td>${esc(p.name)}${injBadge(s, p.id)}</td><td><span class="pill pos">${esc(p.pos)}</span></td><td class="sub">${esc(p.nfl_team)}</td><td class="num">${fmt1(seasonPoints(s, p.id))}</td></tr>`).join("") || `<tr><td class="empty">Empty until the draft</td></tr>`}
         </table></div>
       </div>`;
     }).join("") + `</div>`;
@@ -1406,7 +1410,6 @@ const Views = {
     const A = tm[g.team_a], B = tm[g.team_b];
     const rA = rows.find(x => x.team.id === A.id), rB = rows.find(x => x.team.id === B.id);
     const sa = teamWeekScore(s, A.id, wk), sb = teamWeekScore(s, B.id, wk);
-    const pa = teamWeekProj(s, A.id, wk), pb = teamWeekProj(s, B.id, wk);
     const luA = lineupFor(s, A.id, wk), luB = lineupFor(s, B.id, wk);
     const rec = r => `${r.w}-${r.l}${r.t ? "-" + r.t : ""}`;
     const aw = isFinal && sa > sb, bw = isFinal && sb > sa;
@@ -1420,9 +1423,9 @@ const Views = {
       <div class="card">
         <div class="frow" style="justify-content:space-between">${sel}${isFinal ? `<span class="pill bye">Final</span>` : `<span class="pill bye">Live</span>`}</div>
         <div class="mux-head">
-          <div class="mh-side"><div class="tn ${aw ? "win" : ""}">${tmName(A)}</div><div class="sub">${esc(A.owner)} &middot; ${rec(rA)}</div><div class="mh-sc ${aw ? "win" : ""}">${fmt1(sa)}</div><div class="sub">Proj ${fmt1(pa)}</div></div>
+          <div class="mh-side"><div class="tn ${aw ? "win" : ""}">${tmName(A)}</div><div class="sub">${esc(A.owner)} &middot; ${rec(rA)}</div><div class="mh-sc ${aw ? "win" : ""}">${fmt1(sa)}</div></div>
           <div class="mh-mid">WK ${wk}</div>
-          <div class="mh-side right"><div class="tn ${bw ? "win" : ""}">${tmName(B)}</div><div class="sub">${esc(B.owner)} &middot; ${rec(rB)}</div><div class="mh-sc ${bw ? "win" : ""}">${fmt1(sb)}</div><div class="sub">Proj ${fmt1(pb)}</div></div>
+          <div class="mh-side right"><div class="tn ${bw ? "win" : ""}">${tmName(B)}</div><div class="sub">${esc(B.owner)} &middot; ${rec(rB)}</div><div class="mh-sc ${bw ? "win" : ""}">${fmt1(sb)}</div></div>
         </div>
         ${slotRow("rb","RB")}${slotRow("wr","WR")}${slotRow("def","DEF")}${slotRow("util","UTIL")}
         <h3 style="margin-top:14px">Bench</h3>
@@ -1457,15 +1460,14 @@ const Views = {
     if (st.fum) b.push(`${st.fum} FUM`);
     return b.join(", ");
   },
+  /* blank until the player's game kicks off, then his live points (0.0 to start), then the final number */
   _muxPts(pid, wk) {
     if (!pid) return `<span class="sub">&mdash;</span>`;
     const s = App.state;
-    const p = s.players.find(x => x.id === pid);
     const m = gameInfoFor(s, pid, wk);
     const has = s.stats.some(x => x.player_id === pid && x.week === wk);
-    if (has || (m && m.st !== "pre")) return fmt1(playerWeekPoints(s, pid, wk));
-    const pj = projFor(p);
-    return pj == null ? `<span class="sub">&mdash;</span>` : `<span class="proj">${fmt1(pj)}</span>`;
+    const started = has || weekIsFinal(s, wk) || (m && (m.st === "in" || m.st === "post"));
+    return started ? fmt1(playerWeekPoints(s, pid, wk)) : "";
   },
 
   /* ---------- STANDINGS ---------- */
@@ -1663,7 +1665,9 @@ const Views = {
     if (r && r.error) bits.push(`Last attempt on this device failed: ${esc(r.error)}`);
     else if (r) bits.push(`This device: ${r.games} games read, ${r.matched} players matched, ${r.updated} stat lines updated`);
     const im = App.state.settings.injury_meta;
-    bits.push(im && im.updated_at ? `Injuries: ${Object.keys(im.players || {}).length} flagged, updated ${when(im.updated_at)}` : "Injuries: not synced yet");
+    bits.push(im && im.updated_at ? `Injuries: ${Object.keys(im.players || {}).length} flagged by the league report, updated ${when(im.updated_at)}` : "Injuries: not synced yet");
+    const rfl = Object.keys(((App.state.settings.roster_meta || {}).flags) || {}).length;
+    if (rfl) bits.push(`Roster reserve lists: ${rfl} pool players flagged`);
     const rm = App.state.settings.roster_meta;
     const rr = RosterSync._lastResult;
     if (RosterSync._running) bits.push("Team map: syncing now...");
@@ -1826,7 +1830,7 @@ const LiveSync = {
    ============================================================ */
 const InjurySync = {
   _last: 0, _running: false, _lastResult: null,
-  EVERY_MS: 1800000,
+  EVERY_MS: 900000,
   ABBR: { "injured reserve": "IR", "out": "O", "questionable": "Q", "doubtful": "D", "physically unable to perform": "PUP", "suspension": "SUSP", "suspended": "SUSP", "day-to-day": "DTD", "non football injury": "NFI", "non-football injury": "NFI" },
   short(status) {
     const k = String(status || "").toLowerCase().trim();
@@ -1863,7 +1867,8 @@ const InjurySync = {
           const full = String(inj.status || ((inj.type || {}).description) || ((inj.details || {}).type) || "").trim();
           const st = this.short(full);
           if (!st) continue;
-          players[p.id] = { st, full };
+          const det = inj.details || {};
+          players[p.id] = { st, full, type: String(det.type || "").trim() || undefined, date: inj.date || undefined };
         }
       }
       const old = (s.settings.injury_meta || {}).players || {};
@@ -1925,7 +1930,7 @@ const GameTimes = {
    Display names and the pool's custom nfl_team labels are never touched. */
 const RosterSync = {
   _last: 0, _running: false, _lastResult: null,
-  EVERY_MS: 604800000,
+  EVERY_MS: 86400000,
   tick(force = false) {
     if (!App.state || this._running) return;
     if (!force) {
@@ -1944,7 +1949,7 @@ const RosterSync = {
       const tl = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=32")).json();
       const teams = ((((tl.sports || [])[0] || {}).leagues || [])[0] || {}).teams || [];
       const nm = LiveSync.nameMap();
-      const map = {};
+      const map = {}, flags = {};
       await Promise.all(teams.map(async t => {
         const team = t.team || {};
         const abbr = team.abbreviation || "";
@@ -1956,17 +1961,30 @@ const RosterSync = {
           const list = grp.items || grp.athletes || ((grp.displayName || grp.fullName) ? [grp] : []);
           for (const a of list) {
             const p = nm[LiveSync.norm(a.displayName || a.fullName || "")];
-            if (p) map[p.id] = abbr;
+            if (!p) continue;
+            map[p.id] = abbr;
+            const inj = (a.injuries || [])[0] || {};
+            const rs = String(((a.status || {}).name) || ((a.status || {}).type) || "").toLowerCase();
+            let st = inj.status ? InjurySync.short(String(inj.status)) : null, full = inj.status ? String(inj.status) : "";
+            if (!st) {
+              if (rs.includes("injured reserve")) { st = "IR"; full = "Injured Reserve"; }
+              else if (rs.includes("physically unable")) { st = "PUP"; full = "Physically Unable to Perform"; }
+              else if (rs.includes("non-football") || rs.includes("non football")) { st = "NFI"; full = (a.status || {}).name || "Non-Football Injury"; }
+              else if (rs.includes("suspend")) { st = "SUSP"; full = "Suspended"; }
+            }
+            if (st) flags[p.id] = { st, full, type: String(((inj.details || {}).type) || "").trim() || undefined, date: inj.date || undefined, src: "roster" };
           }
         }
       }));
       if (!Object.keys(map).length) throw new Error("no players matched, map left unchanged");
-      const old = (s.settings.roster_meta || {}).teams || {};
-      const changed = JSON.stringify(old) !== JSON.stringify(map);
-      await App.store.saveSetting("roster_meta", { updated_at: new Date().toISOString(), teams: map });
+      const oldMeta = s.settings.roster_meta || {};
+      const teamsChanged = JSON.stringify(oldMeta.teams || {}) !== JSON.stringify(map);
+      const changed = teamsChanged || JSON.stringify(oldMeta.flags || {}) !== JSON.stringify(flags);
+      await App.store.saveSetting("roster_meta", { updated_at: new Date().toISOString(), teams: map, flags });
       this._lastResult = { mapped: Object.keys(map).length, at: new Date().toISOString() };
       if (manual) toast(`Team map synced: ${Object.keys(map).length} of ${s.players.length} pool players matched`);
-      if (changed) { GameTimes._cache = {}; await App.queueRefresh(); }
+      if (teamsChanged) GameTimes._cache = {};
+      if (changed) await App.queueRefresh();
     } catch (e) {
       this._lastResult = { error: e.message };
       if (manual) toast("Team map sync failed: " + e.message);
