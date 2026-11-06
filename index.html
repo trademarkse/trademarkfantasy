@@ -211,6 +211,15 @@ const POOL_ADDS = [
   { id: 55, rank: 55, name: "Parker Washington", pos: "WR", nfl_team: "Jacksonville Jaguars", pts_2025: 184.7, rookie: false } // added 10/27/26
 ];
 
+/* ---------- ESPN player ids (pins) ----------
+   Every ESPN feed is matched by ESPN's own player id. The team map finds each player's id by itself from the
+   32 rosters; pin a player here only when ESPN's name is too different to find, or two NFL players share it.
+   One line per player, our id: "ESPN id" (the number in his espn.com player URL). */
+const ESPN_IDS = {
+  27: "4362506", // Gregory Rousseau: ESPN lists him as "Greg Rousseau"
+  29: "4427728"  // Zonovan "Bam" Knight: ESPN lists him as "Bam Knight"
+};
+
 /* ---------- utils ---------- */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -529,6 +538,7 @@ const LocalStore = {
     });
   },
   async saveSetting(key, value) { return this._mut(s => { s.settings[key] = value; }); },
+  async weekStats(week) { return this._load().stats.filter(x => x.week === week); },
   async addPlayers(rows) { return this._mut(s => { for (const r of rows) if (!s.players.some(p => p.id === r.id)) s.players.push({ ...r }); s.players.sort((a, b) => a.rank - b.rank); }); },
   async updateTeam(teamId, patch) { return this._mut(s => Object.assign(s.teams.find(t => t.id === teamId), patch)); },
   async updateScheduleGame(week, game, patch) {
@@ -629,6 +639,11 @@ const SupaStore = {
   async saveStats(rows) {
     const { error } = await this.client.from("player_stats").upsert(rows);
     if (error) throw error;
+  },
+  async weekStats(week) {
+    const { data, error } = await this.client.from("player_stats").select("*").eq("week", week);
+    if (error) throw error;
+    return data;
   },
   async addPlayers(rows) {
     const { error } = await this.client.from("players").upsert(rows, { onConflict: "id", ignoreDuplicates: true });
@@ -1620,7 +1635,7 @@ const Views = {
       </div>
       <div class="card">
         <h2>Live Stat Feed</h2>
-        <p class="sub">Pulls real NFL box scores every few minutes while anyone has the site open, writes them into the week, and every matchup recalculates on its own. The manual grid below is the backup and takes over once a week is marked final. One gap: box scores only show fumble recoveries, not forced fumbles, so add FF by hand before finalizing a week. Game times and live status in Matchup come from a weekly team map, synced automatically.</p>
+        <p class="sub">Pulls real NFL box scores every few minutes while anyone has the site open, writes them into the week, and every matchup recalculates on its own. The manual grid below is the backup and takes over once a week is marked final. Players are matched to ESPN by ESPN's player id, so a name ESPN spells differently can't drop anyone. Forced fumbles aren't in box scores, so they come from each player's ESPN game log every 30 minutes during games and once more after the week closes. Game times and live status in Matchup come from a daily team map, synced automatically.</p>
         <div class="btnrow" style="margin-top:8px">
           <button class="btn gold" onclick="LiveSync.sync(${wk}, true)">Sync week ${wk} now</button>
           <button class="btn" onclick="Views._toggleFeed()">${this._feedOn() ? "Turn auto-sync off" : "Turn auto-sync on"}</button>
@@ -1628,6 +1643,7 @@ const Views = {
           <button class="btn" onclick="RosterSync.sync(true)">Sync team map</button>
         </div>
         <p class="sub" style="margin-top:8px">${this._feedStatus()}</p>
+        ${this._matchReport()}
       </div>
       <div class="card">
         <h2>Enter Stats</h2>
@@ -1720,6 +1736,8 @@ const Views = {
     if (RosterSync._running) bits.push("Team map: syncing now...");
     else if (rr && rr.error) bits.push(`Team map sync failed on this device: ${esc(rr.error)}`);
     else bits.push(rm && rm.updated_at ? `Team map: ${Object.keys(rm.teams || {}).length} of ${App.state.players.length} players mapped, updated ${when(rm.updated_at)}` : "Team map: not synced yet");
+    const fm = App.state.settings.ff_meta;
+    bits.push(fm && fm.tried_at ? `Forced fumbles: ${fm.read} of ${fm.of} ESPN game logs read, updated ${when(fm.tried_at)}${fm.ok === false ? " (some failed, retrying every 30 min)" : ""}` : "Forced fumbles: not pulled yet");
     if (POOL_ADDS.length) {
       const rmt = ((rm || {}).teams) || {}, bf = App.state.settings.pool_backfill || {};
       const open = POOL_ADDS.map(a => {
@@ -1732,6 +1750,24 @@ const Views = {
       bits.push(open.length ? `Pool adds: ${open.join(", ")}` : `Pool adds: ${POOL_ADDS.length} mid-season ${POOL_ADDS.length === 1 ? "player" : "players"} in the pool, mapped and backfilled`);
     }
     return bits.join(" &middot; ");
+  },
+  /* how every pool player is matched to ESPN, who's being re-pulled, and any finished result a stat fix changed */
+  _matchReport() {
+    const s = App.state, rm = s.settings.roster_meta || {}, pm = byId(s.players), tm = byId(s.teams);
+    const nm = pid => esc((pm[pid] || {}).name || "?"), bad = t => `<b style="color:var(--bad)">${t}</b>`;
+    if (rm.v !== Match.V) return `<p class="sub" style="margin-top:6px">ESPN player match: building the new id-based team map (or hit Sync team map).</p>`;
+    const how = rm.how || {}, espn = rm.espn || {}, lines = [];
+    lines.push(`ESPN player match: <b>${Object.keys(rm.ids || {}).length} of ${s.players.length}</b> players matched by ESPN id`);
+    const odd = Object.keys(how).filter(pid => how[pid] !== "exact" && pm[pid]);
+    if (odd.length) lines.push(`Name mismatches and namesakes, matched by ESPN id: ${odd.map(pid => `${nm(pid)}${espn[pid] ? ` = "${esc(espn[pid])}"` : ""}${how[pid] === "namesake" ? " (another NFL player has his name)" : how[pid] === "pinned" && !(rm.teams || {})[pid] ? " (pinned, not on a roster right now)" : ""}`).join(", ")}`);
+    if ((rm.miss || []).length) lines.push(bad(`Not found on any ESPN roster: ${rm.miss.map(nm).join(", ")}`));
+    if ((rm.dup || []).length) lines.push(bad(`Two ESPN players share the name, needs a pin: ${rm.dup.map(nm).join(", ")}`));
+    const done = s.settings.stat_repair || {}, fm = s.settings.ff_meta || {};
+    const re = [...new Set([...(rm.recheck || []), ...(fm.pick6 || [])])].filter(pid => pm[pid]);
+    if (re.length) { const left = re.filter(pid => !done[pid]); lines.push(left.length ? `Past weeks: re-pulling ${left.map(nm).join(", ")}` : `Past weeks re-pulled: ${re.map(nm).join(", ")}`); }
+    const log = (s.settings.stat_fix_log || []).slice(-15);
+    if (log.length) lines.push(`Finished results changed by stat fixes: ${log.map(c => `Wk ${c.week} ${esc((tm[c.a] || {}).owner || "?")} ${fmt1(c.was[0])}-${fmt1(c.was[1])} ${esc((tm[c.b] || {}).owner || "?")}, now ${fmt1(c.now[0])}-${fmt1(c.now[1])}`).join(" &middot; ")}`);
+    return `<div class="sub" style="margin-top:6px">${lines.map(l => `<div style="margin-top:4px">${l}</div>`).join("")}</div>`;
   },
   saveStats(week) {
     const rows = {};
@@ -1758,6 +1794,131 @@ const Views = {
   savePlayoffGame(week, game) {
     const a = $(`po-${week}-${game}-a`).value, b = $(`po-${week}-${game}-b`).value;
     App.mutate(() => App.store.updateScheduleGame(week, game, { team_a: a ? +a : null, team_b: b ? +b : null }), "Playoff game saved");
+  }
+};
+
+/* ============================================================
+   Player matching: our pool -> ESPN, by ESPN's player id.
+   The team map resolves every pool player's id once a day from all 32 rosters: exact name first, then a
+   quoted nickname ("Bam"), then the same last name and first initial at his position. Box scores, injuries,
+   game logs and kickoff locks then look players up by that id, so a name ESPN spells differently can't
+   drop anyone and another NFL player with the same name can't add to anyone. Pins in ESPN_IDS always win.
+   ============================================================ */
+const Match = {
+  V: 2, // team map version: a map saved by an older build gets rebuilt on load
+  group(pos) {
+    const p = String(pos || "").toUpperCase();
+    if (["RB", "FB", "HB"].includes(p)) return "RB";
+    if (p === "WR") return "WR";
+    if (["LB", "OLB", "ILB", "MLB", "S", "FS", "SS", "SAF", "CB", "DB", "DE", "DT", "NT", "DL", "EDGE"].includes(p)) return "DEF";
+    return p;
+  },
+  /* our name -> lookup keys: the full name, plus nickname + last name when there's a nickname in quotes */
+  keys(name) {
+    const n = String(name || ""), out = [LiveSync.norm(n)];
+    const nick = n.match(/["\u201c\u201d]([^"\u201c\u201d]+)["\u201c\u201d]/);
+    if (nick) out.push(LiveSync.norm(nick[1] + " " + n.replace(/["\u201c\u201d][^"\u201c\u201d]*["\u201c\u201d]/g, " ").trim().split(/\s+/).slice(1).join(" ")));
+    return [...new Set(out.filter(Boolean))];
+  },
+  /* an ESPN athlete -> lookup keys from every name field ESPN sends */
+  aKeys(a) {
+    a = a || {};
+    return [...new Set([a.displayName, a.fullName, a.firstName && a.lastName ? a.firstName + " " + a.lastName : ""].map(x => LiveSync.norm(x)).filter(Boolean))];
+  },
+  lastTok(n) { const t = LiveSync.norm(n).split(" "); return t[t.length - 1] || ""; },
+  /* ESPN's player id: rosters and box scores carry it as id, the injury report only inside its links */
+  espnId(a) {
+    if (!a) return "";
+    if (a.id) return String(a.id);
+    for (const l of (a.links || [])) { const m = String(l.href || "").match(/\/id\/(\d+)/); if (m) return m[1]; }
+    const h = String((a.headshot || {}).href || "").match(/\/(\d+)\.png/);
+    return h ? h[1] : "";
+  },
+  /* pool id -> ESPN id: the team map's ids with the pins on top */
+  ids(state) { return { ...((((state || App.state).settings.roster_meta || {}).ids) || {}), ...ESPN_IDS }; },
+  /* lookup tables for one sync: by ESPN id, plus by name for players the team map hasn't placed yet
+     (never for a name two NFL players share) */
+  index(state) {
+    const s = state || App.state, pm = byId(s.players), byEspn = {}, byName = {};
+    for (const [pid, eid] of Object.entries(this.ids(s))) if (pm[pid] && eid) byEspn[String(eid)] = pm[pid];
+    const placed = new Set(Object.values(byEspn).map(p => p.id)), dup = new Set(((s.settings.roster_meta || {}).dup) || []);
+    for (const p of s.players) if (!placed.has(p.id) && !dup.has(p.id)) for (const k of this.keys(p.name)) byName[k] = p;
+    return { byEspn, byName };
+  },
+  find(a, ix) {
+    const id = this.espnId(a);
+    if (id && ix.byEspn[id]) return ix.byEspn[id];
+    for (const k of this.aKeys(a)) if (ix.byName[k]) return ix.byName[k];
+    return null;
+  },
+  /* the daily team map: each pool player -> one athlete on the 32 rosters */
+  resolve(s, roster) {
+    const byKey = {}, byLast = {}, byEid = {};
+    for (const r of roster) {
+      if (byEid[r.id]) continue;
+      byEid[r.id] = r;
+      for (const k of this.aKeys(r.a)) (byKey[k] = byKey[k] || []).push(r);
+      const ln = this.lastTok(r.a.lastName || r.a.displayName);
+      if (ln) (byLast[ln] = byLast[ln] || []).push({ r, fi: LiveSync.norm(r.a.firstName || r.a.displayName).charAt(0) });
+    }
+    const uniq = list => [...new Map(list.map(r => [r.id, r])).values()];
+    const out = { ids: {}, teams: {}, how: {}, espn: {}, miss: [], dup: [], recheck: [], ent: {} };
+    for (const p of s.players) {
+      const g = this.group(p.pos), own = LiveSync.norm(p.name), pin = ESPN_IDS[p.id];
+      let c, via = "name";
+      if (pin) c = byEid[String(pin)] ? [byEid[String(pin)]] : [];
+      else {
+        c = uniq(this.keys(p.name).flatMap(k => byKey[k] || []));
+        if (!c.length) { via = "close"; c = uniq((byLast[this.lastTok(p.name)] || []).filter(x => x.fi === own.charAt(0) && this.group(x.r.pos) === g).map(x => x.r)); }
+        if (c.length > 1) { const sg = c.filter(r => this.group(r.pos) === g); if (sg.length) c = sg; }
+        if (c.length > 1) { const st = c.filter(r => r.team === p.nfl_team); if (st.length === 1) c = st; }
+      }
+      if (pin) { out.ids[p.id] = String(pin); out.how[p.id] = "pinned"; out.recheck.push(p.id); }
+      if (c.length === 1) {
+        const r = c[0], dn = LiveSync.norm(r.a.displayName || "");
+        out.ids[p.id] = r.id; out.teams[p.id] = r.abbr; out.ent[p.id] = r;
+        if (dn !== own) out.espn[p.id] = r.a.displayName || "";
+        if (!pin) {
+          /* the old feed matched box scores on exact display name, so anyone ESPN spells differently, or whose
+             name another NFL player has, may have bad past weeks: those get re-pulled once */
+          const twin = (byKey[own] || []).some(o => o.id !== r.id && LiveSync.norm(o.a.displayName || "") === own);
+          out.how[p.id] = dn !== own ? (via === "close" ? "close" : "renamed") : twin ? "namesake" : "exact";
+          if (out.how[p.id] !== "exact") out.recheck.push(p.id);
+        }
+      } else if (!pin) (c.length ? out.dup : out.miss).push(p.id);
+    }
+    return out;
+  },
+  /* one player's regular-season game log: the games he played (event id + week) and, per game, the forced
+     fumbles, recoveries and interception TDs that box scores leave out or double count */
+  async gamelog(eid) {
+    try {
+      const res = await fetch(`https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${eid}/gamelog`);
+      if (!res.ok) return null;
+      const j = await res.json();
+      const N = (j.names || []).map(String), L = (j.labels || []).map(x => String(x).toUpperCase());
+      const at = (name, label) => { const i = N.indexOf(name); return i >= 0 ? i : L.indexOf(label); };
+      const iINT = L.indexOf("INT"), iFF = at("fumblesForced", "FF"), iFR = at("fumblesRecovered", "FR");
+      const iIT = N.indexOf("interceptionTouchdowns") >= 0 ? N.indexOf("interceptionTouchdowns") : iINT >= 0 ? L.indexOf("TD", iINT) : -1;
+      const num = (st, i) => (i >= 0 && st) ? (parseFloat(st[i]) || 0) : 0;
+      const seen = new Set(), games = [];
+      for (const t of (j.seasonTypes || [])) {
+        if (!/regular/i.test(String(t.displayName || ""))) continue;
+        for (const cat of (t.categories || [])) for (const e of (cat.events || [])) {
+          const id = String(e.eventId || ""), week = +(((j.events || {})[id] || {}).week);
+          if (!id || !week || seen.has(id)) continue;
+          seen.add(id);
+          games.push({ id, week, ff: num(e.stats, iFF), fr: num(e.stats, iFR), it: num(e.stats, iIT) });
+        }
+      }
+      return { games };
+    } catch (e) { return null; }
+  },
+  async gamelogs(eids, n = 6) { // a few at a time
+    const out = new Array(eids.length); let i = 0;
+    const run = async () => { while (i < eids.length) { const k = i++; out[k] = eids[k] ? await this.gamelog(eids[k]) : null; } };
+    await Promise.all(Array.from({ length: Math.min(n, eids.length) }, run));
+    return out;
   }
 };
 
@@ -1789,7 +1950,7 @@ const LiveSync = {
     }
     this._last = Date.now();
     const cw = Math.min(currentWeek(App.state), 17);
-    this.sync(cw, force).then(() => this.backfill(cw)).then(() => this.backfillAdds(cw)).catch(e => { this._lastResult = { error: e.message }; });
+    this.sync(cw, force).then(() => this.backfill(cw)).then(() => this.backfillAdds(cw)).then(() => this.history(cw)).catch(e => { this._lastResult = { error: e.message }; });
   },
   _backfilled: {},
   /* every completed week gets one closing pull after Monday night (tracked league-wide in week_pulls),
@@ -1838,7 +1999,103 @@ const LiveSync = {
       if (saved) await App.queueRefresh();
     } finally { this._addsRunning = false; }
   },
-  async sync(week, manual = false, only = null) {
+  /* after each feed run: forced fumbles from ESPN game logs, then the one-time re-pull of past weeks for
+     players the old name matching missed. Every finished matchup either one changes is logged for Admin. */
+  _histRunning: false,
+  async history(cw) {
+    if (this._histRunning || !App.state || !this.enabled()) return;
+    if ((App.state.settings.roster_meta || {}).v !== Match.V) return; // needs the id-based team map first
+    this._histRunning = true;
+    try {
+      const before = this._results(App.state, cw);
+      const wrote = (await this.forced(cw)) + (await this.repair(cw));
+      if (!wrote) return;
+      const fresh = await App.store.refresh(), after = this._results(fresh, cw), changed = [], at = new Date().toISOString();
+      for (const k in after) {
+        const x = before[k], y = after[k];
+        if (x && (x.sa !== y.sa || x.sb !== y.sb)) changed.push({ week: y.week, a: y.a, b: y.b, was: [x.sa, x.sb], now: [y.sa, y.sb], at });
+      }
+      if (changed.length) await App.store.saveSetting("stat_fix_log", [...(fresh.settings.stat_fix_log || []), ...changed].slice(-40));
+      await App.queueRefresh();
+    } finally { this._histRunning = false; }
+  },
+  _results(state, cw) {
+    const out = {}, r1 = n => Math.round(n * 10) / 10;
+    for (let w = 1; w < cw; w++) for (const g of weekGames(state, w)) {
+      if (g.team_a && g.team_b) out[w + "-" + g.game] = { week: w, a: g.team_a, b: g.team_b, sa: r1(teamWeekScore(state, g.team_a, w)), sb: r1(teamWeekScore(state, g.team_b, w)) };
+    }
+    return out;
+  },
+  _row(old, pid, week, patch) {
+    const o = old || {};
+    return { player_id: pid, week, td: o.td || 0, yds: o.yds || 0, rec: o.rec || 0, fum: o.fum || 0, solo: o.solo || 0, ast: o.ast || 0, sack: o.sack || 0, intc: o.intc || 0, pbu: o.pbu || 0, ffr: o.ffr || 0, ...patch };
+  },
+  /* forced fumbles aren't in box scores: each player's ESPN game log adds his FF (plus recoveries) to the
+     week's line, every 30 minutes while a week is live and once more after it closes */
+  FF_EVERY_MS: 1800000,
+  _ffResult: null, _pick6: null,
+  async forced(cw) {
+    const s = App.state, fm = s.settings.ff_meta || {}, closed = fm.weeks || {};
+    const open = []; for (let w = 1; w < cw; w++) if (!closed[w]) open.push(w);
+    const since = fm.tried_at ? Date.now() - new Date(fm.tried_at).getTime() : Infinity;
+    const due = (open.length && (fm.ok !== false || since >= this.FF_EVERY_MS)) || (since >= this.FF_EVERY_MS && weekStarted(s, cw));
+    if (!due) return 0;
+    const ids = Match.ids(s), pool = s.players.filter(p => ids[p.id]);
+    const logs = await Match.gamelogs(pool.map(p => ids[p.id]));
+    const want = new Set([...open, cw]), cand = [], pick6 = new Set(fm.pick6 || []);
+    let read = 0;
+    pool.forEach((p, i) => {
+      const gl = logs[i]; if (!gl) return;
+      read++;
+      for (const g of gl.games) {
+        if (g.it > 0 && g.week < cw) pick6.add(p.id);
+        if (want.has(g.week) && g.ff + g.fr > 0) cand.push([p.id, g.week, g.ff + g.fr]);
+      }
+    });
+    const rows = [], fresh = {}; // compare against the stored lines as they are right now, so nothing newer gets overwritten
+    for (const [pid, week, target] of cand) {
+      if (!fresh[week]) fresh[week] = await App.store.weekStats(week).catch(() => s.stats.filter(x => x.week === week));
+      const old = fresh[week].find(x => x.player_id === pid);
+      if ((old ? old.ffr || 0 : 0) < target) rows.push(this._row(old, pid, week, { ffr: target }));
+    }
+    if (rows.length) await App.store.saveStats(rows);
+    const at = new Date().toISOString(), ok = pool.length > 0 && read === pool.length, weeks = { ...closed };
+    if (ok) for (const w of open) weeks[w] = at;
+    this._pick6 = pick6;
+    await App.store.saveSetting("ff_meta", { tried_at: at, ok, read, of: pool.length, weeks, pick6: [...pick6] });
+    this._ffResult = { read, of: pool.length, updated: rows.length, at };
+    return rows.length;
+  },
+  /* one time per player: re-pull the finished weeks of anyone the old name-only matching missed or could have
+     mixed up (ESPN spells him differently, another NFL player shares his name, or a pick-six that used to count
+     twice). Only their own stat lines are rewritten. */
+  async repair(cw) {
+    const s = App.state, rm = s.settings.roster_meta || {}, done = { ...(s.settings.stat_repair || {}) };
+    const all = new Set([...(rm.recheck || []), ...(((s.settings.ff_meta || {}).pick6) || []), ...(this._pick6 || [])]);
+    const need = [...all].filter(pid => !done[pid] && s.players.some(p => p.id === pid));
+    if (!need.length || cw < 2) return 0;
+    const ids = Match.ids(s), only = new Set(need);
+    const logs = await Match.gamelogs(need.map(pid => ids[pid]));
+    const known = logs.every(Boolean); // game logs say exactly which games to read; without them, read every game
+    let wrote = 0;
+    for (let w = 1; w < cw; w++) {
+      const evs = known ? [...new Set(logs.flatMap(l => l.games.filter(g => g.week === w).map(g => g.id)))] : null;
+      if (evs && !evs.length) continue; // none of them played that week
+      for (let i = 0; i < 80 && this._running; i++) await new Promise(r => setTimeout(r, 250));
+      let r = null;
+      try {
+        r = await this.sync(w, false, only, { events: evs, all: true });
+        if (r && evs && r.due < evs.length) r = await this.sync(w, false, only, { all: true }); // a game missing from the scoreboard: read them all
+      } catch (e) { r = null; }
+      if (!r || r.games !== r.due) return wrote; // try again on the next run
+      wrote += r.updated;
+    }
+    const at = new Date().toISOString();
+    for (const pid of need) done[pid] = at;
+    await App.store.saveSetting("stat_repair", done);
+    return wrote;
+  },
+  async sync(week, manual = false, only = null, opts = {}) {
     if (this._running) return;
     this._running = true;
     try {
@@ -1847,11 +2104,11 @@ const LiveSync = {
       const season = (s.settings.league || {}).season || new Date().getFullYear();
       const sb = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=${season}`)).json();
       const events = sb.events || [];
-      const nm = this.nameMap();
+      const ix = Match.index(s);
       const rmt = ((s.settings.roster_meta || {}).teams) || {};
-      const onlyTeams = only && [...only].every(pid => rmt[pid]) ? new Set([...only].map(pid => rmt[pid])) : null;
+      const onlyTeams = only && !opts.all && [...only].every(pid => rmt[pid]) ? new Set([...only].map(pid => rmt[pid])) : null;
       const acc = {}, meta = {};
-      const zero = () => ({ td: 0, yds: 0, rec: 0, fum: 0, solo: 0, ast: 0, sack: 0, intc: 0, pbu: 0, _pd: 0, _fr: 0 });
+      const zero = () => ({ td: 0, yds: 0, rec: 0, fum: 0, solo: 0, ast: 0, sack: 0, intc: 0, pbu: 0, _pd: 0, _fr: 0, _dtd: 0, _itd: 0 });
       let gamesRead = 0, gamesDue = 0;
       for (const ev of events) {
         const comp = (ev.competitions || [])[0]; if (!comp) continue;
@@ -1859,6 +2116,7 @@ const LiveSync = {
         const detail = ((ev.status || {}).type || {}).shortDetail || "";
         if (gstate === "pre") continue;
         if (onlyTeams && !(comp.competitors || []).some(c => onlyTeams.has(((c.team || {}).abbreviation) || ""))) continue;
+        if (opts.events && !opts.events.includes(String(ev.id))) continue;
         gamesDue++;
         let box;
         try { box = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${ev.id}`)).json(); }
@@ -1874,8 +2132,7 @@ const LiveSync = {
             const labels = (cat.labels || cat.keys || []).map(x => String(x).toUpperCase());
             const Li = lab => labels.indexOf(lab);
             for (const a of (cat.athletes || [])) {
-              const disp = ((a.athlete || {}).displayName) || "";
-              const p = nm[this.norm(disp)];
+              const p = Match.find(a.athlete || {}, ix);
               if (!p || (only && !only.has(p.id))) continue;
               const row = acc[p.id] = acc[p.id] || zero();
               meta[p.id] = { st: gstate, dt: detail, opp: oppAbbr, home };
@@ -1884,18 +2141,20 @@ const LiveSync = {
               if (cn === "rushing") { row.yds += v(Li("YDS")); row.td += v(Li("TD")); }
               else if (cn === "receiving") { row.rec += v(Li("REC")); row.yds += v(Li("YDS")); row.td += v(Li("TD")); }
               else if (cn === "fumbles") { row.fum += v(Li("LOST")); row._fr += v(Li("REC")); }
-              else if (cn === "defensive") { const solo = v(Li("SOLO")), tot = v(Li("TOT")); row.solo += solo; row.ast += Math.max(0, tot - solo); row.sack += v(Li("SACKS")); row._pd += v(Li("PD")); row.td += v(Li("TD")); }
-              else if (cn === "interceptions") { row.intc += v(Li("INT")); row.td += v(Li("TD")); }
+              else if (cn === "defensive") { const solo = v(Li("SOLO")), tot = v(Li("TOT")); row.solo += solo; row.ast += Math.max(0, tot - solo); row.sack += v(Li("SACKS")); row._pd += v(Li("PD")); row._dtd += v(Li("TD")); }
+              else if (cn === "interceptions") { row.intc += v(Li("INT")); row._itd += v(Li("TD")); }
               else if (cn === "kickreturns" || cn === "puntreturns") { row.td += v(Li("TD")); }
             }
           }
         }
       }
       const rows = [];
+      const cur = Object.keys(acc).length ? await App.store.weekStats(week).catch(() => s.stats.filter(x => x.week === week)) : []; // stored lines as of now
       for (const [pidStr, r] of Object.entries(acc)) {
         const pid = +pidStr;
         r.pbu = Math.max(0, r._pd - r.intc);
-        const old = s.stats.find(x => x.player_id === pid && x.week === week) || {};
+        r.td += Math.max(r._dtd, r._itd); // a pick-six can show in both the defensive and the interception TD column: count it once
+        const old = cur.find(x => x.player_id === pid) || {};
         const out = { player_id: pid, week, td: r.td, yds: Math.round(r.yds * 10) / 10, rec: r.rec, fum: r.fum, solo: r.solo, ast: r.ast, sack: Math.round(r.sack * 10) / 10, intc: r.intc, pbu: r.pbu, ffr: Math.max(old.ffr || 0, r._fr) };
         const same = ["td","yds","rec","fum","solo","ast","sack","intc","pbu","ffr"].every(k => (old[k] || 0) === out[k]);
         if (!same) rows.push(out);
@@ -1930,7 +2189,7 @@ const InjurySync = {
     if (!force) {
       if (Date.now() - this._last < 60000) return;
       const im = App.state.settings.injury_meta;
-      if (im && im.updated_at && Date.now() - new Date(im.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
+      if (im && im.updated_at && im.v === Match.V && Date.now() - new Date(im.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
     }
     this._last = Date.now();
     this.sync().catch(e => { this._lastResult = { error: e.message }; });
@@ -1942,14 +2201,14 @@ const InjurySync = {
       const s = App.state;
       const res = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries")).json();
       const teams = res.injuries || res.teams || res.items || [];
-      const nm = LiveSync.nameMap();
+      const ix = Match.index(s);
       const players = {};
       let listed = 0;
       for (const team of teams) {
         for (const inj of (team.injuries || [])) {
           listed++;
           const a = inj.athlete || {};
-          const p = nm[LiveSync.norm(a.displayName || a.fullName || "")];
+          const p = Match.find(a, ix);
           if (!p) continue;
           const full = String(inj.status || ((inj.type || {}).description) || ((inj.details || {}).type) || "").trim();
           const st = this.short(full);
@@ -1960,7 +2219,7 @@ const InjurySync = {
       }
       const old = (s.settings.injury_meta || {}).players || {};
       const changed = JSON.stringify(old) !== JSON.stringify(players);
-      await App.store.saveSetting("injury_meta", { updated_at: new Date().toISOString(), players });
+      await App.store.saveSetting("injury_meta", { v: Match.V, updated_at: new Date().toISOString(), players });
       this._lastResult = { listed, matched: Object.keys(players).length, at: new Date().toISOString() };
       if (manual) toast(`Injury report synced: ${Object.keys(players).length} pool players flagged`);
       if (changed) await App.queueRefresh();
@@ -2018,12 +2277,16 @@ const GameTimes = {
 const RosterSync = {
   _last: 0, _running: false, _lastResult: null,
   EVERY_MS: 86400000,
+  async _kick() { // first id-based map on this device: fix past weeks now instead of on the next feed run
+    for (let i = 0; i < 20 && ((App.state.settings.roster_meta || {}).v !== Match.V); i++) { await new Promise(r => setTimeout(r, 500)); await App.queueRefresh(); }
+    LiveSync.history(Math.min(currentWeek(App.state), 17));
+  },
   tick(force = false) {
     if (!App.state || this._running) return;
     if (!force) {
       if (Date.now() - this._last < 3600000) return;
       const rm = App.state.settings.roster_meta;
-      if (rm && rm.updated_at && rm.pool === App.state.players.length && Date.now() - new Date(rm.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
+      if (rm && rm.updated_at && rm.v === Match.V && rm.pool === App.state.players.length && Date.now() - new Date(rm.updated_at).getTime() < this.EVERY_MS) { this._last = Date.now(); return; }
     }
     this._last = Date.now();
     this.sync().catch(() => {});
@@ -2035,8 +2298,8 @@ const RosterSync = {
       const s = App.state;
       const tl = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=32")).json();
       const teams = ((((tl.sports || [])[0] || {}).leagues || [])[0] || {}).teams || [];
-      const nm = LiveSync.nameMap();
-      const map = {}, flags = {};
+      const roster = [];
+      let read = 0;
       await Promise.all(teams.map(async t => {
         const team = t.team || {};
         const abbr = team.abbreviation || "";
@@ -2044,34 +2307,50 @@ const RosterSync = {
         let rj;
         try { rj = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${team.id}/roster`)).json(); }
         catch (e) { return; }
+        read++;
         for (const grp of (rj.athletes || [])) {
           const list = grp.items || grp.athletes || ((grp.displayName || grp.fullName) ? [grp] : []);
-          for (const a of list) {
-            const p = nm[LiveSync.norm(a.displayName || a.fullName || "")];
-            if (!p) continue;
-            map[p.id] = abbr;
-            const inj = (a.injuries || [])[0] || {};
-            const rs = String(((a.status || {}).name) || ((a.status || {}).type) || "").toLowerCase();
-            let st = inj.status ? InjurySync.short(String(inj.status)) : null, full = inj.status ? String(inj.status) : "";
-            if (!st) {
-              if (rs.includes("injured reserve")) { st = "IR"; full = "Injured Reserve"; }
-              else if (rs.includes("physically unable")) { st = "PUP"; full = "Physically Unable to Perform"; }
-              else if (rs.includes("non-football") || rs.includes("non football")) { st = "NFI"; full = (a.status || {}).name || "Non-Football Injury"; }
-              else if (rs.includes("suspend")) { st = "SUSP"; full = "Suspended"; }
-            }
-            if (st) flags[p.id] = { st, full, type: String(((inj.details || {}).type) || "").trim() || undefined, date: inj.date || undefined, src: "roster" };
-          }
+          for (const a of list) { const id = Match.espnId(a); if (id) roster.push({ id, a, abbr, team: team.displayName || "", pos: ((a.position || {}).abbreviation) || "" }); }
         }
       }));
-      if (!Object.keys(map).length) throw new Error("no players matched, map left unchanged");
+      const m = Match.resolve(s, roster);
+      if (!Object.keys(m.teams).length) throw new Error("no players matched, map left unchanged");
       const oldMeta = s.settings.roster_meta || {};
-      const teamsChanged = JSON.stringify(oldMeta.teams || {}) !== JSON.stringify(map);
-      const changed = teamsChanged || JSON.stringify(oldMeta.flags || {}) !== JSON.stringify(flags);
-      await App.store.saveSetting("roster_meta", { updated_at: new Date().toISOString(), teams: map, flags, pool: s.players.length });
-      this._lastResult = { mapped: Object.keys(map).length, at: new Date().toISOString() };
-      if (manual) toast(`Team map synced: ${Object.keys(map).length} of ${s.players.length} pool players matched`);
+      if (read < teams.length) { // a roster didn't load: anyone it would have placed keeps what the last map knew
+        for (const p of s.players) {
+          const oid = (oldMeta.ids || {})[p.id];
+          if (m.ids[p.id] || !oid) continue;
+          m.ids[p.id] = oid;
+          if ((oldMeta.teams || {})[p.id]) m.teams[p.id] = oldMeta.teams[p.id];
+          if ((oldMeta.how || {})[p.id]) m.how[p.id] = oldMeta.how[p.id];
+          if ((oldMeta.espn || {})[p.id]) m.espn[p.id] = oldMeta.espn[p.id];
+          if ((oldMeta.recheck || []).includes(p.id)) m.recheck.push(p.id);
+          m.miss = m.miss.filter(x => x !== p.id); m.dup = m.dup.filter(x => x !== p.id);
+        }
+      }
+      const flags = {};
+      for (const [pid, r] of Object.entries(m.ent)) {
+        const a = r.a, inj = (a.injuries || [])[0] || {};
+        const rs = String(((a.status || {}).name) || ((a.status || {}).type) || "").toLowerCase();
+        let st = inj.status ? InjurySync.short(String(inj.status)) : null, full = inj.status ? String(inj.status) : "";
+        if (!st) {
+          if (rs.includes("injured reserve")) { st = "IR"; full = "Injured Reserve"; }
+          else if (rs.includes("physically unable")) { st = "PUP"; full = "Physically Unable to Perform"; }
+          else if (rs.includes("non-football") || rs.includes("non football")) { st = "NFI"; full = (a.status || {}).name || "Non-Football Injury"; }
+          else if (rs.includes("suspend")) { st = "SUSP"; full = "Suspended"; }
+        }
+        if (st) flags[pid] = { st, full, type: String(((inj.details || {}).type) || "").trim() || undefined, date: inj.date || undefined, src: "roster" };
+      }
+      const meta = { v: Match.V, updated_at: new Date().toISOString(), teams: m.teams, ids: m.ids, how: m.how, espn: m.espn, miss: m.miss, dup: m.dup, recheck: m.recheck, flags, pool: s.players.length };
+      const teamsChanged = JSON.stringify(oldMeta.teams || {}) !== JSON.stringify(m.teams);
+      const changed = teamsChanged || oldMeta.v !== Match.V || JSON.stringify(oldMeta.ids || {}) !== JSON.stringify(m.ids) || JSON.stringify(oldMeta.flags || {}) !== JSON.stringify(flags);
+      await App.store.saveSetting("roster_meta", meta);
+      this._lastResult = { mapped: Object.keys(m.ids).length, at: meta.updated_at };
+      const look = m.miss.length + m.dup.length;
+      if (manual) toast(`Team map synced: ${Object.keys(m.ids).length} of ${s.players.length} pool players matched${look ? `, ${look} need a look in Admin` : ""}`);
       if (teamsChanged) GameTimes._cache = {};
       if (changed) await App.queueRefresh();
+      if (oldMeta.v !== Match.V) this._kick(); // first id-based map: fix past weeks now instead of on the next feed run
     } catch (e) {
       this._lastResult = { error: e.message };
       if (manual) toast("Team map sync failed: " + e.message);
