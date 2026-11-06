@@ -217,8 +217,11 @@ const POOL_ADDS = [
    One line per player, our id: "ESPN id" (the number in his espn.com player URL). */
 const ESPN_IDS = {
   27: "4362506", // Gregory Rousseau: ESPN lists him as "Greg Rousseau"
-  29: "4427728"  // Zonovan "Bam" Knight: ESPN lists him as "Bam Knight"
+  29: "4427728", // Zonovan "Bam" Knight: ESPN lists him as "Bam Knight"
+  19: "4046537"  // Josh Metellus: ESPN lists him as "Joshua Metellus"
 };
+/* ESPN's 32 NFL team ids (they never change). ESPN's team list is blocked in browsers, each team's roster isn't. */
+const ESPN_TEAM_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 33, 34];
 
 /* ---------- utils ---------- */
 const $ = (id) => document.getElementById(id);
@@ -1734,7 +1737,8 @@ const Views = {
     const rm = App.state.settings.roster_meta;
     const rr = RosterSync._lastResult;
     if (RosterSync._running) bits.push("Team map: syncing now...");
-    else if (rr && rr.error) bits.push(`Team map sync failed on this device: ${esc(rr.error)}`);
+    else if (rr && rr.error) bits.push(`<b style="color:var(--bad)">Team map sync failed on this device: ${esc(rr.error)}${rm && rm.updated_at ? ` (last good map ${when(rm.updated_at)})` : ""}</b>`);
+    else if (rm && rm.updated_at && Date.now() - new Date(rm.updated_at).getTime() > 3 * 86400000) bits.push(`<b style="color:var(--bad)">Team map is stale: last updated ${when(rm.updated_at)}</b>`);
     else bits.push(rm && rm.updated_at ? `Team map: ${Object.keys(rm.teams || {}).length} of ${App.state.players.length} players mapped, updated ${when(rm.updated_at)}` : "Team map: not synced yet");
     const fm = App.state.settings.ff_meta;
     bits.push(fm && fm.tried_at ? `Forced fumbles: ${fm.read} of ${fm.of} ESPN game logs read, updated ${when(fm.tried_at)}${fm.ok === false ? " (some failed, retrying every 30 min)" : ""}` : "Forced fumbles: not pulled yet");
@@ -1893,7 +1897,8 @@ const Match = {
      fumbles, recoveries and interception TDs that box scores leave out or double count */
   async gamelog(eid) {
     try {
-      const res = await fetch(`https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${eid}/gamelog`);
+      const yr = String(((App.state && App.state.settings.league) || {}).season || new Date().getFullYear());
+      const res = await fetch(`https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${eid}/gamelog?season=${yr}`);
       if (!res.ok) return null;
       const j = await res.json();
       const N = (j.names || []).map(String), L = (j.labels || []).map(x => String(x).toUpperCase());
@@ -1903,7 +1908,8 @@ const Match = {
       const num = (st, i) => (i >= 0 && st) ? (parseFloat(st[i]) || 0) : 0;
       const seen = new Set(), games = [];
       for (const t of (j.seasonTypes || [])) {
-        if (!/regular/i.test(String(t.displayName || ""))) continue;
+        const dn = String(t.displayName || "");
+        if (!/regular/i.test(dn) || !dn.includes(yr)) continue; // this season's regular season only
         for (const cat of (t.categories || [])) for (const e of (cat.events || [])) {
           const id = String(e.eventId || ""), week = +(((j.events || {})[id] || {}).week);
           if (!id || !week || seen.has(id)) continue;
@@ -2081,7 +2087,6 @@ const LiveSync = {
     for (let w = 1; w < cw; w++) {
       const evs = known ? [...new Set(logs.flatMap(l => l.games.filter(g => g.week === w).map(g => g.id)))] : null;
       if (evs && !evs.length) continue; // none of them played that week
-      for (let i = 0; i < 80 && this._running; i++) await new Promise(r => setTimeout(r, 250));
       let r = null;
       try {
         r = await this.sync(w, false, only, { events: evs, all: true });
@@ -2096,7 +2101,10 @@ const LiveSync = {
     return wrote;
   },
   async sync(week, manual = false, only = null, opts = {}) {
-    if (this._running) return;
+    const prev = this._queue || Promise.resolve();
+    let release;
+    this._queue = new Promise(r => { release = r; });
+    await prev; // one pull at a time: wait for the one in progress instead of skipping
     this._running = true;
     try {
       const s = App.state;
@@ -2166,7 +2174,7 @@ const LiveSync = {
       if (manual) toast(`Feed: ${gamesRead} games read, ${rows.length} stat lines updated`);
       await App.queueRefresh();
       return res;
-    } finally { this._running = false; }
+    } finally { this._running = false; release(); }
   }
 };
 
@@ -2296,23 +2304,25 @@ const RosterSync = {
     this._running = true;
     try {
       const s = App.state;
-      const tl = await (await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=32")).json();
-      const teams = ((((tl.sports || [])[0] || {}).leagues || [])[0] || {}).teams || [];
+      /* ESPN's team list (/nfl/teams) has been blocked in browsers since mid-September, which froze the old map on
+         9/13. Each team's roster still loads, so the 32 team ids are listed in ESPN_TEAM_IDS. */
+      const teams = ESPN_TEAM_IDS;
       const roster = [];
       let read = 0;
-      await Promise.all(teams.map(async t => {
-        const team = t.team || {};
-        const abbr = team.abbreviation || "";
-        if (!team.id || !abbr) return;
+      await Promise.all(teams.map(async tid => {
         let rj;
-        try { rj = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${team.id}/roster`)).json(); }
+        try { const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${tid}/roster`); if (!res.ok) return; rj = await res.json(); }
         catch (e) { return; }
+        const team = rj.team || {};
+        const abbr = team.abbreviation || "";
+        if (!abbr) return;
         read++;
         for (const grp of (rj.athletes || [])) {
           const list = grp.items || grp.athletes || ((grp.displayName || grp.fullName) ? [grp] : []);
           for (const a of list) { const id = Match.espnId(a); if (id) roster.push({ id, a, abbr, team: team.displayName || "", pos: ((a.position || {}).abbreviation) || "" }); }
         }
       }));
+      if (!read) throw new Error("no ESPN rosters loaded, map left unchanged");
       const m = Match.resolve(s, roster);
       if (!Object.keys(m.teams).length) throw new Error("no players matched, map left unchanged");
       const oldMeta = s.settings.roster_meta || {};
